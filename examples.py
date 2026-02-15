@@ -77,7 +77,7 @@ def demo_code_review():
 
     # Sample code with issues
     sample_code = '''
-def process_data(data):
+def process_data(data, user_id):
     result = ""
     for item in data:
         result += str(item) + ","

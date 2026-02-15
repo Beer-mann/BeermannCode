@@ -267,8 +267,9 @@ class CodeReviewer:
         
         # Check for hardcoded secrets
         sensitive_keywords = ["password", "api_key", "secret", "token"]
+        code_lower = code.lower()
         for keyword in sensitive_keywords:
-            if f'{keyword} =' in code.lower() or f'{keyword}=' in code.lower():
+            if f'{keyword}=' in code_lower or f'{keyword} =' in code_lower:
                 comments.append(ReviewComment(
                     line_number=None,
                     severity="critical",
