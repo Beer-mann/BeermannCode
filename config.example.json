@@ -1,0 +1,23 @@
+# Example configuration for CodeAI Platform
+# Copy this to config.json and customize for your project
+
+{
+  "project_name": "my_software_project",
+  "project_type": "web",
+  "supported_languages": ["python", "javascript", "java"],
+  
+  "model_name": "codeai-v1",
+  "max_tokens": 2048,
+  "temperature": 0.7,
+  
+  "enable_code_analysis": true,
+  "enable_code_generation": true,
+  "enable_code_review": true,
+  
+  "review_depth": "standard",
+  "auto_fix_issues": false,
+  
+  "generation_style": "clean",
+  "include_comments": true,
+  "include_tests": true
+}
