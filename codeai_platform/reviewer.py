@@ -13,7 +13,7 @@ class ReviewComment:
     """A single review comment."""
     
     line_number: Optional[int]
-    severity: str  # info, warning, error, critical
+    severity: str  # info, warning, critical
     category: str  # style, performance, security, maintainability
     message: str
     suggestion: Optional[str] = None

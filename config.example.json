@@ -1,7 +1,5 @@
-# Example configuration for CodeAI Platform
-# Copy this to config.json and customize for your project
-
 {
+  "_comment": "Example configuration for CodeAI Platform - Copy this to config.json and customize for your project",
   "project_name": "my_software_project",
   "project_type": "web",
   "supported_languages": ["python", "javascript", "java"],
