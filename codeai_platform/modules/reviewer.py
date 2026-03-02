@@ -3,7 +3,6 @@ Code review module for CodeAI Platform.
 Provides automated code review and improvement suggestions.
 """
 
-import os
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 from pathlib import Path
@@ -62,14 +61,7 @@ class CodeReviewer:
         """Initialize code reviewer with configuration."""
         self.config = config
         self.review_rules = self._load_review_rules()
-        self.openai_client = None
-        try:
-            from openai import OpenAI
-            api_key = os.environ.get("OPENAI_API_KEY")
-            if api_key:
-                self.openai_client = OpenAI(api_key=api_key)
-        except ImportError:
-            pass
+        self.openai_client = config.get_openai_client()
 
     def review_file(self, file_path: str) -> ReviewResult:
         """

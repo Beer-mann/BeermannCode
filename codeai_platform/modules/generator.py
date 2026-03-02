@@ -3,7 +3,6 @@ Code generation module for CodeAI Platform.
 Generates code snippets, functions, and boilerplate code using OpenAI.
 """
 
-import os
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 
@@ -48,14 +47,7 @@ class CodeGenerator:
         """Initialize code generator with configuration."""
         self.config = config
         self.templates = self._load_templates()
-        self.openai_client = None
-        try:
-            from openai import OpenAI
-            api_key = os.environ.get("OPENAI_API_KEY")
-            if api_key:
-                self.openai_client = OpenAI(api_key=api_key)
-        except ImportError:
-            pass
+        self.openai_client = config.get_openai_client()
 
     def generate(self, request: GenerationRequest) -> GenerationResult:
         """
