@@ -13,6 +13,12 @@ Usage:
     python3 orchestrator.py --model qwen2.5-coder:7b # Force model
     python3 orchestrator.py --dry-run                # Show what would happen
     python3 orchestrator.py --list-models            # List available Ollama models
+    python3 orchestrator.py --health                 # Health check + alert if down
+    python3 orchestrator.py --security               # Security scan all projects
+    python3 orchestrator.py --deps                   # Dependency scan
+    python3 orchestrator.py --tests                  # Run all project tests
+    python3 orchestrator.py --refactor               # Refactoring analysis
+    python3 orchestrator.py --tier 2                 # Enable external models (1-4)
 """
 
 import argparse
@@ -32,6 +38,11 @@ from typing import Dict, List, Optional, Tuple
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 from codeai_platform.config import CodeAIConfig, OLLAMA_MODELS, MODEL_ROUTING
+from codeai_platform.modules.health_monitor import HealthMonitor
+from codeai_platform.modules.security_scanner import SecurityScanner
+from codeai_platform.modules.dependency_scanner import DependencyScanner
+from codeai_platform.modules.test_runner import TestRunner
+from codeai_platform.modules.refactorer import CodeRefactorer
 
 logging.basicConfig(
     level=logging.INFO,
@@ -97,6 +108,11 @@ class Orchestrator:
         self.dry_run = dry_run
         self.state = OrchestratorState.load()
         self.tasks: List[Task] = []
+        self.health_monitor = HealthMonitor(config)
+        self.security_scanner = SecurityScanner(config)
+        self.dependency_scanner = DependencyScanner(config)
+        self.test_runner = TestRunner(config)
+        self.refactorer = CodeRefactorer(config)
         LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
     # ── Model Management ──────────────────────────────────
@@ -557,6 +573,142 @@ class Orchestrator:
         print()
 
 
+    # ── New Module Commands ────────────────────────────────
+
+    def run_health_check(self) -> str:
+        """Run health check and return status."""
+        health = self.health_monitor.check_health()
+        summary = self.health_monitor.get_status_summary()
+        log.info(summary.replace("\n", " | "))
+
+        # Check if alert needed
+        alert = self.health_monitor.should_alert()
+        if alert:
+            log.warning(f"ALERT: {alert[:100]}")
+        return summary
+
+    def run_security_scan(self, project_filter: Optional[str] = None):
+        """Run security scan across projects."""
+        projects = list(PROJECTS_DIR.iterdir()) if PROJECTS_DIR.exists() else []
+        total_findings = 0
+
+        print(f"\n{'='*60}")
+        print(f"  🔒 Security Scan")
+        print(f"{'='*60}\n")
+
+        for project_dir in sorted(projects):
+            if not project_dir.is_dir() or project_dir.name.startswith("."):
+                continue
+            if project_filter and project_dir.name != project_filter:
+                continue
+
+            result = self.security_scanner.scan_project(str(project_dir))
+            total_findings += len(result.findings)
+
+            icon = "🔴" if result.critical_count > 0 else "🟡" if result.high_count > 0 else "🟢"
+            print(f"{icon} {result.project}: {len(result.findings)} findings "
+                  f"({result.critical_count} critical, {result.high_count} high) "
+                  f"Risk: {result.risk_score:.0f}/100")
+
+            for f in result.findings[:3]:
+                print(f"   {f.severity.upper()}: {f.title} ({f.file_path}:{f.line})")
+
+        print(f"\nTotal: {total_findings} findings across {len(projects)} projects")
+
+    def run_dependency_scan(self, project_filter: Optional[str] = None):
+        """Run dependency scan across projects."""
+        projects = list(PROJECTS_DIR.iterdir()) if PROJECTS_DIR.exists() else []
+
+        print(f"\n{'='*60}")
+        print(f"  📦 Dependency Scan")
+        print(f"{'='*60}\n")
+
+        for project_dir in sorted(projects):
+            if not project_dir.is_dir() or project_dir.name.startswith("."):
+                continue
+            if project_filter and project_dir.name != project_filter:
+                continue
+
+            result = self.dependency_scanner.scan_project(str(project_dir))
+            if result.total_deps == 0:
+                continue
+
+            print(f"📁 {result.project}: {result.total_deps} deps ({', '.join(result.ecosystems)})")
+            if result.outdated_count:
+                print(f"   ⚠️ {result.outdated_count} outdated")
+            if result.unused_imports:
+                print(f"   🗑️ {len(result.unused_imports)} unused imports")
+                for imp in result.unused_imports[:3]:
+                    print(f"      {imp['file']}:{imp['line']} → {imp['import']}")
+            print()
+
+    def run_tests(self, project_filter: Optional[str] = None):
+        """Run tests across projects."""
+        print(f"\n{'='*60}")
+        print(f"  🧪 Test Runner")
+        print(f"{'='*60}\n")
+
+        projects = PROJECTS_DIR if PROJECTS_DIR.exists() else Path(".")
+
+        for project_dir in sorted(projects.iterdir()):
+            if not project_dir.is_dir() or project_dir.name.startswith("."):
+                continue
+            if project_filter and project_dir.name != project_filter:
+                continue
+
+            fw = self.test_runner.detect_framework(str(project_dir))
+            if not fw:
+                continue
+
+            print(f"🧪 {project_dir.name} ({fw})... ", end="", flush=True)
+            result = self.test_runner.run_tests(str(project_dir))
+
+            if result.total > 0:
+                icon = "✅" if result.failed == 0 else "❌"
+                print(f"{icon} {result.passed}/{result.total} passed ({result.duration_seconds:.1f}s)")
+                for f in result.failures[:2]:
+                    print(f"   FAIL: {f['test']}")
+            else:
+                print("⏭️ No tests found")
+
+    def run_refactor_analysis(self, project_filter: Optional[str] = None):
+        """Run refactoring analysis across projects."""
+        print(f"\n{'='*60}")
+        print(f"  🔧 Refactoring Analysis")
+        print(f"{'='*60}\n")
+
+        for project_dir in sorted(PROJECTS_DIR.iterdir()):
+            if not project_dir.is_dir() or project_dir.name.startswith("."):
+                continue
+            if project_filter and project_dir.name != project_filter:
+                continue
+
+            results = self.refactorer.analyze_project(str(project_dir))
+            total_suggestions = sum(len(r.suggestions) for r in results)
+            total_smells = sum(len(r.code_smells) for r in results)
+            total_dupes = sum(len(r.duplications) for r in results)
+            total_hotspots = sum(len(r.complexity_hotspots) for r in results)
+
+            if total_suggestions + total_smells + total_dupes + total_hotspots == 0:
+                continue
+
+            print(f"📁 {project_dir.name}:")
+            if total_suggestions:
+                print(f"   💡 {total_suggestions} refactoring suggestions")
+            if total_smells:
+                print(f"   👃 {total_smells} code smells")
+            if total_dupes:
+                print(f"   📋 {total_dupes} duplications")
+            if total_hotspots:
+                print(f"   🔥 {total_hotspots} complexity hotspots")
+
+            # Show top suggestions
+            all_suggestions = [s for r in results for s in r.suggestions]
+            for s in sorted(all_suggestions, key=lambda x: {"high": 0, "medium": 1, "low": 2}.get(x.severity, 3))[:3]:
+                print(f"      [{s.severity}] {s.description[:80]}")
+            print()
+
+
 def main():
     parser = argparse.ArgumentParser(description="BeermannCode Autonomous Orchestrator")
     parser.add_argument("--project", help="Scan only this project")
@@ -565,10 +717,52 @@ def main():
     parser.add_argument("--scan-only", action="store_true", help="Scan only, don't execute")
     parser.add_argument("--list-models", action="store_true", help="List available Ollama models")
     parser.add_argument("--max-tasks", type=int, default=10, help="Max tasks to execute")
+    parser.add_argument("--health", action="store_true", help="Health check")
+    parser.add_argument("--security", action="store_true", help="Security scan")
+    parser.add_argument("--deps", action="store_true", help="Dependency scan")
+    parser.add_argument("--tests", action="store_true", help="Run project tests")
+    parser.add_argument("--refactor", action="store_true", help="Refactoring analysis")
+    parser.add_argument("--tier", type=int, default=1, help="Max model tier (1=Ollama, 2-4=external)")
+    parser.add_argument("--all", action="store_true", help="Run all analyses")
     args = parser.parse_args()
 
     config = CodeAIConfig.from_file(str(Path(__file__).parent / "config.json"))
+    if args.tier > 1:
+        config.enable_external = True
+        config.max_tier = args.tier
+        log.info(f"External models enabled up to tier {args.tier}")
+
     orchestrator = Orchestrator(config, dry_run=args.dry_run)
+
+    # Health check (always first)
+    if args.health or args.all:
+        print(orchestrator.run_health_check())
+        if not args.all:
+            return
+
+    # Security scan
+    if args.security or args.all:
+        orchestrator.run_security_scan(args.project)
+        if not args.all:
+            return
+
+    # Dependency scan
+    if args.deps or args.all:
+        orchestrator.run_dependency_scan(args.project)
+        if not args.all:
+            return
+
+    # Test runner
+    if args.tests or args.all:
+        orchestrator.run_tests(args.project)
+        if not args.all:
+            return
+
+    # Refactoring analysis
+    if args.refactor or args.all:
+        orchestrator.run_refactor_analysis(args.project)
+        if not args.all:
+            return
 
     if args.list_models:
         models = orchestrator.list_models()
