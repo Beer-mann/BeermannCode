@@ -141,6 +141,71 @@ Create a `config.json` file based on `config.example.json`:
 - Go (.go)
 - Rust (.rs)
 
+## 🌐 REST API (Port 5004)
+
+### Start the server
+
+```bash
+./start.sh
+# or
+python3 app.py
+```
+
+### Endpoints
+
+#### GET /health
+```bash
+curl http://localhost:5004/health
+# {"status": "ok", "service": "BeermannCode"}
+```
+
+#### GET /languages
+```bash
+curl http://localhost:5004/languages
+# {"languages": ["python", "javascript", "java", "cpp", "c", "csharp", "go", "rust"]}
+```
+
+#### POST /analyze
+Analyze code quality, complexity, and issues.
+
+```bash
+curl -X POST http://localhost:5004/analyze \
+  -H "Content-Type: application/json" \
+  -d '{"code": "def hello():\n    print(\"hello\")\n", "language": "python"}'
+```
+
+Response: `language`, `lines_of_code`, `complexity_score`, `quality_score`, `issues`, `suggestions`
+
+#### POST /review
+Review code for style, performance, security, and maintainability.
+
+```bash
+curl -X POST http://localhost:5004/review \
+  -H "Content-Type: application/json" \
+  -d '{"code": "password = \"secret123\"\neval(user_input)\n", "language": "python"}'
+```
+
+Response: `overall_rating` (excellent/good/fair/poor), `comments`, `summary`, `metrics`
+
+#### POST /generate
+Generate code from a description or function name.
+
+```bash
+# Generate by description
+curl -X POST http://localhost:5004/generate \
+  -H "Content-Type: application/json" \
+  -d '{"description": "function to sort a list", "language": "python"}'
+
+# Generate a specific function
+curl -X POST http://localhost:5004/generate \
+  -H "Content-Type: application/json" \
+  -d '{"description": "calculate sum", "function_name": "calculate_sum", "args": ["a", "b"], "language": "python"}'
+```
+
+Response: `code`, `language`, `description` (and `includes_tests`, `metadata` for description-based generation)
+
+---
+
 ## 🤝 Contributing
 
 Contributions are welcome! This platform is designed for software projects and can be extended with additional features.

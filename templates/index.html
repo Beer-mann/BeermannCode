@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BeermannCode – AI Code Assistant</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" rel="stylesheet" />
+  <style>
+    body { background: #0d1117; color: #e6edf3; min-height: 100vh; }
+    .navbar-brand { font-weight: 700; letter-spacing: 1px; }
+    .card { background: #161b22; border: 1px solid #30363d; border-radius: 10px; }
+    .card-header { background: #21262d; border-bottom: 1px solid #30363d; }
+    textarea { background: #0d1117 !important; color: #e6edf3 !important; border: 1px solid #30363d !important; font-family: 'Fira Code', 'Courier New', monospace; font-size: 13px; resize: vertical; }
+    textarea:focus { border-color: #58a6ff !important; box-shadow: 0 0 0 3px rgba(88,166,255,.15) !important; }
+    select { background: #21262d !important; color: #e6edf3 !important; border: 1px solid #30363d !important; }
+    select:focus { border-color: #58a6ff !important; box-shadow: 0 0 0 3px rgba(88,166,255,.15) !important; }
+    .nav-pills .nav-link { color: #8b949e; border: 1px solid transparent; }
+    .nav-pills .nav-link.active { background: #1f6feb; border-color: #388bfd; color: #fff; }
+    .nav-pills .nav-link:hover:not(.active) { color: #58a6ff; border-color: #30363d; }
+    .btn-primary { background: #1f6feb; border-color: #388bfd; }
+    .btn-primary:hover { background: #388bfd; border-color: #58a6ff; }
+    pre { background: #0d1117 !important; border: 1px solid #30363d; border-radius: 8px; padding: 1rem; margin: 0; }
+    code.hljs { background: transparent !important; }
+    .result-panel { display: none; }
+    .result-panel.active { display: block; }
+    .badge-excellent { background: #238636; }
+    .badge-good { background: #1f6feb; }
+    .badge-fair { background: #d29922; }
+    .badge-poor { background: #da3633; }
+    .score-circle { width: 80px; height: 80px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.4rem; font-weight: 700; }
+    .score-high { background: #0f3d17; border: 3px solid #238636; color: #3fb950; }
+    .score-mid  { background: #2d2a0d; border: 3px solid #d29922; color: #e3b341; }
+    .score-low  { background: #3d0f0f; border: 3px solid #da3633; color: #f85149; }
+    .issue-item { background: #21262d; border-radius: 6px; padding: .5rem .75rem; margin-bottom: .4rem; border-left: 3px solid #30363d; }
+    .issue-item.critical { border-left-color: #da3633; }
+    .issue-item.warning  { border-left-color: #d29922; }
+    .issue-item.info     { border-left-color: #58a6ff; }
+    .ai-box { background: #0d2137; border: 1px solid #1f6feb; border-radius: 8px; padding: 1rem; white-space: pre-wrap; font-size: .875rem; line-height: 1.6; }
+    .copy-btn { position: absolute; top: .5rem; right: .5rem; }
+    .spinner-border { width: 1.2rem; height: 1.2rem; }
+    #errorAlert { display: none; }
+  </style>
+</head>
+<body>
+<nav class="navbar navbar-dark" style="background:#161b22; border-bottom:1px solid #30363d;">
+  <div class="container-fluid">
+    <span class="navbar-brand">&#x1F9E0; BeermannCode</span>
+    <span class="text-secondary small">AI Code Assistant &mdash; gpt-4o-mini</span>
+  </div>
+</nav>
+
+<div class="container-fluid py-4" style="max-width:1100px;">
+
+  <!-- Top controls -->
+  <div class="card mb-3">
+    <div class="card-body">
+      <div class="row g-3 align-items-end">
+        <div class="col-md-3">
+          <label class="form-label text-secondary small">Language</label>
+          <select id="languageSelect" class="form-select">
+            <option value="python">Python</option>
+            <option value="javascript">JavaScript</option>
+            <option value="java">Java</option>
+            <option value="cpp">C++</option>
+            <option value="c">C</option>
+            <option value="csharp">C#</option>
+            <option value="go">Go</option>
+            <option value="rust">Rust</option>
+          </select>
+        </div>
+        <div class="col-md-9">
+          <ul class="nav nav-pills" id="modeTabs">
+            <li class="nav-item"><a class="nav-link active" href="#" data-mode="analyze">&#x1F50D; Analyze</a></li>
+            <li class="nav-item ms-2"><a class="nav-link" href="#" data-mode="review">&#x1F4CB; Review</a></li>
+            <li class="nav-item ms-2"><a class="nav-link" href="#" data-mode="generate">&#x2728; Generate</a></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3">
+    <!-- Input panel -->
+    <div class="col-lg-5">
+      <div class="card h-100">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <span id="inputLabel" class="fw-semibold">Code Input</span>
+        </div>
+        <div class="card-body d-flex flex-column gap-2">
+          <!-- Code textarea (analyze + review) -->
+          <div id="codeInputWrap">
+            <textarea id="codeInput" class="form-control" rows="18" placeholder="Paste your code here..."></textarea>
+          </div>
+          <!-- Description textarea (generate) -->
+          <div id="descInputWrap" style="display:none;">
+            <textarea id="descInput" class="form-control" rows="6" placeholder="Describe what you want to generate, e.g. 'A function that sorts a list of dictionaries by a given key'"></textarea>
+            <div class="mt-2 d-flex gap-2">
+              <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="includeComments" checked>
+                <label class="form-check-label text-secondary small" for="includeComments">Comments</label>
+              </div>
+              <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="includeTests">
+                <label class="form-check-label text-secondary small" for="includeTests">Tests</label>
+              </div>
+            </div>
+          </div>
+
+          <button id="runBtn" class="btn btn-primary w-100 mt-auto">
+            <span id="btnText">Analyze</span>
+            <span id="btnSpinner" class="spinner-border ms-2 d-none" role="status"></span>
+          </button>
+          <div id="errorAlert" class="alert alert-danger py-2 small mb-0"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Results panel -->
+    <div class="col-lg-7">
+      <div class="card h-100">
+        <div class="card-header fw-semibold">Results</div>
+        <div class="card-body" style="overflow-y:auto; max-height:600px;">
+          <div id="placeholder" class="text-secondary text-center py-5">
+            <div style="font-size:3rem;">&#x1F9E0;</div>
+            <div class="mt-2">Submit code to see AI results</div>
+          </div>
+
+          <!-- Analyze results -->
+          <div id="analyzeResult" class="result-panel">
+            <div class="d-flex align-items-center gap-3 mb-3">
+              <div id="qualityCircle" class="score-circle score-high">0</div>
+              <div>
+                <div class="fw-semibold">Quality Score</div>
+                <div class="text-secondary small" id="analyzeLanguage"></div>
+                <div class="text-secondary small" id="analyzeLOC"></div>
+                <div class="text-secondary small" id="analyzeComplexity"></div>
+              </div>
+            </div>
+
+            <div id="issuesSection" class="mb-3"></div>
+            <div id="suggestionsSection" class="mb-3"></div>
+            <div id="aiInsightsSection"></div>
+          </div>
+
+          <!-- Review results -->
+          <div id="reviewResult" class="result-panel">
+            <div class="d-flex align-items-center gap-3 mb-3">
+              <span id="ratingBadge" class="badge fs-6 px-3 py-2">GOOD</span>
+              <div>
+                <div class="fw-semibold">Code Review</div>
+                <div id="reviewMetrics" class="text-secondary small"></div>
+              </div>
+            </div>
+            <div id="reviewSummary" class="mb-3 text-secondary small" style="white-space:pre-wrap;"></div>
+            <div id="reviewComments" class="mb-3"></div>
+            <div id="aiReviewSection"></div>
+          </div>
+
+          <!-- Generate results -->
+          <div id="generateResult" class="result-panel">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <span class="fw-semibold">Generated Code</span>
+              <button class="btn btn-sm btn-outline-secondary" id="copyBtn">Copy</button>
+            </div>
+            <div class="position-relative">
+              <pre><code id="generatedCode" class="language-python"></code></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>
+const modeTabLinks = document.querySelectorAll('#modeTabs .nav-link');
+let currentMode = 'analyze';
+
+modeTabLinks.forEach(link => {
+  link.addEventListener('click', e => {
+    e.preventDefault();
+    modeTabLinks.forEach(l => l.classList.remove('active'));
+    link.classList.add('active');
+    currentMode = link.dataset.mode;
+    updateUI();
+  });
+});
+
+function updateUI() {
+  const isGenerate = currentMode === 'generate';
+  document.getElementById('codeInputWrap').style.display = isGenerate ? 'none' : '';
+  document.getElementById('descInputWrap').style.display = isGenerate ? '' : 'none';
+  document.getElementById('inputLabel').textContent = isGenerate ? 'Description' : 'Code Input';
+  document.getElementById('btnText').textContent =
+    currentMode === 'analyze' ? 'Analyze' : currentMode === 'review' ? 'Review' : 'Generate';
+  clearResults();
+}
+
+function clearResults() {
+  document.getElementById('placeholder').style.display = 'block';
+  document.querySelectorAll('.result-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('errorAlert').style.display = 'none';
+}
+
+document.getElementById('runBtn').addEventListener('click', async () => {
+  const lang = document.getElementById('languageSelect').value;
+  const btnSpinner = document.getElementById('btnSpinner');
+  const errorAlert = document.getElementById('errorAlert');
+  errorAlert.style.display = 'none';
+  btnSpinner.classList.remove('d-none');
+  document.getElementById('runBtn').disabled = true;
+
+  try {
+    let url, body;
+    if (currentMode === 'analyze') {
+      const code = document.getElementById('codeInput').value.trim();
+      if (!code) throw new Error('Please enter some code to analyze.');
+      url = '/analyze';
+      body = { code, language: lang };
+    } else if (currentMode === 'review') {
+      const code = document.getElementById('codeInput').value.trim();
+      if (!code) throw new Error('Please enter some code to review.');
+      url = '/review';
+      body = { code, language: lang };
+    } else {
+      const description = document.getElementById('descInput').value.trim();
+      if (!description) throw new Error('Please enter a description.');
+      url = '/generate';
+      body = {
+        description,
+        language: lang,
+        include_comments: document.getElementById('includeComments').checked,
+        include_tests: document.getElementById('includeTests').checked,
+      };
+    }
+
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+
+    document.getElementById('placeholder').style.display = 'none';
+    document.querySelectorAll('.result-panel').forEach(p => p.classList.remove('active'));
+
+    if (currentMode === 'analyze') renderAnalyze(data);
+    else if (currentMode === 'review') renderReview(data);
+    else renderGenerate(data, lang);
+
+  } catch (err) {
+    errorAlert.textContent = err.message;
+    errorAlert.style.display = 'block';
+  } finally {
+    btnSpinner.classList.add('d-none');
+    document.getElementById('runBtn').disabled = false;
+  }
+});
+
+function renderAnalyze(d) {
+  const panel = document.getElementById('analyzeResult');
+  panel.classList.add('active');
+
+  const score = d.quality_score || 0;
+  const circle = document.getElementById('qualityCircle');
+  circle.textContent = Math.round(score);
+  circle.className = 'score-circle ' + (score >= 70 ? 'score-high' : score >= 40 ? 'score-mid' : 'score-low');
+
+  document.getElementById('analyzeLanguage').textContent = 'Language: ' + d.language;
+  document.getElementById('analyzeLOC').textContent = 'Lines of code: ' + d.lines_of_code;
+  document.getElementById('analyzeComplexity').textContent = 'Complexity: ' + d.complexity_score;
+
+  // Issues
+  const issuesSec = document.getElementById('issuesSection');
+  if (d.issues && d.issues.length) {
+    issuesSec.innerHTML = `<div class="fw-semibold mb-2">Issues (${d.issues.length})</div>`;
+    d.issues.forEach(iss => {
+      const sev = iss.severity || 'info';
+      issuesSec.innerHTML += `<div class="issue-item ${sev}">
+        <span class="badge bg-secondary me-1">${iss.type}</span>
+        ${iss.line ? `<span class="text-secondary small">L${iss.line}</span> ` : ''}
+        <span class="small">${iss.message}</span>
+      </div>`;
+    });
+  } else {
+    issuesSec.innerHTML = '<div class="text-success small">No issues detected.</div>';
+  }
+
+  // Suggestions
+  const sugSec = document.getElementById('suggestionsSection');
+  if (d.suggestions && d.suggestions.length) {
+    sugSec.innerHTML = `<div class="fw-semibold mb-2">Suggestions</div><ul class="small text-secondary mb-0">`;
+    d.suggestions.forEach(s => { sugSec.innerHTML += `<li>${s}</li>`; });
+    sugSec.innerHTML += '</ul>';
+  } else {
+    sugSec.innerHTML = '';
+  }
+
+  // AI insights
+  const aiSec = document.getElementById('aiInsightsSection');
+  if (d.ai_insights) {
+    aiSec.innerHTML = `<div class="fw-semibold mb-2">&#x1F9E0; AI Insights</div><div class="ai-box">${escapeHtml(d.ai_insights)}</div>`;
+  } else {
+    aiSec.innerHTML = '<div class="text-secondary small">AI insights unavailable (no OPENAI_API_KEY).</div>';
+  }
+}
+
+function renderReview(d) {
+  const panel = document.getElementById('reviewResult');
+  panel.classList.add('active');
+
+  const rating = d.overall_rating || 'good';
+  const badge = document.getElementById('ratingBadge');
+  badge.textContent = rating.toUpperCase();
+  badge.className = `badge fs-6 px-3 py-2 badge-${rating}`;
+
+  const m = d.metrics || {};
+  document.getElementById('reviewMetrics').textContent =
+    `${m.total_lines || 0} lines | ${m.critical_issues || 0} critical | ${m.warnings || 0} warnings | ${m.info_issues || 0} info`;
+
+  document.getElementById('reviewSummary').textContent = d.summary || '';
+
+  // Comments
+  const commentsDiv = document.getElementById('reviewComments');
+  if (d.comments && d.comments.length) {
+    commentsDiv.innerHTML = `<div class="fw-semibold mb-2">Comments (${d.comments.length})</div>`;
+    d.comments.slice(0, 20).forEach(c => {
+      commentsDiv.innerHTML += `<div class="issue-item ${c.severity}">
+        <div class="d-flex gap-2 align-items-center flex-wrap">
+          <span class="badge bg-secondary">${c.category}</span>
+          <span class="badge ${c.severity === 'critical' ? 'bg-danger' : c.severity === 'warning' ? 'bg-warning text-dark' : 'bg-info text-dark'}">${c.severity}</span>
+          ${c.line_number ? `<span class="text-secondary small">L${c.line_number}</span>` : ''}
+        </div>
+        <div class="small mt-1">${escapeHtml(c.message)}</div>
+        ${c.suggestion ? `<div class="small text-secondary mt-1">&#x1F4A1; ${escapeHtml(c.suggestion)}</div>` : ''}
+      </div>`;
+    });
+    if (d.comments.length > 20) {
+      commentsDiv.innerHTML += `<div class="text-secondary small">&hellip; and ${d.comments.length - 20} more</div>`;
+    }
+  }
+
+  // AI review
+  const aiSec = document.getElementById('aiReviewSection');
+  if (d.ai_review) {
+    aiSec.innerHTML = `<div class="fw-semibold mb-2">&#x1F9E0; AI Review</div><div class="ai-box">${escapeHtml(d.ai_review)}</div>`;
+  } else {
+    aiSec.innerHTML = '<div class="text-secondary small">AI review unavailable (no OPENAI_API_KEY).</div>';
+  }
+}
+
+function renderGenerate(d, lang) {
+  const panel = document.getElementById('generateResult');
+  panel.classList.add('active');
+
+  const codeEl = document.getElementById('generatedCode');
+  codeEl.className = `language-${lang}`;
+  codeEl.textContent = d.code || '';
+  hljs.highlightElement(codeEl);
+}
+
+document.getElementById('copyBtn').addEventListener('click', () => {
+  const code = document.getElementById('generatedCode').textContent;
+  navigator.clipboard.writeText(code).then(() => {
+    const btn = document.getElementById('copyBtn');
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+  });
+});
+
+function escapeHtml(str) {
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+</script>
+</body>
+</html>

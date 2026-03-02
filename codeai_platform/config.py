@@ -17,6 +17,7 @@ class CodeAIConfig:
     
     # AI Model Settings
     model_name: str = "codeai-v1"
+    openai_model: str = "gpt-4o-mini"
     max_tokens: int = 2048
     temperature: float = 0.7
     
