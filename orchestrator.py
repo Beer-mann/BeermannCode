@@ -31,6 +31,8 @@ WHATSAPP_TO = os.getenv("WHATSAPP_TO", "+4917643995085")
 CODEX_FALLBACK = os.getenv("CODEX_FALLBACK", "true").lower() == "true"
 CHAIN_COOLDOWN_SEC = int(os.getenv("CHAIN_COOLDOWN_SEC", "45"))
 DYNAMIC_CHAIN = os.getenv("DYNAMIC_CHAIN", "true").lower() == "true"
+TASK_TIMEOUT_SEC = int(os.getenv("TASK_TIMEOUT_SEC", "120"))
+MAX_LOCAL_ATTEMPTS = int(os.getenv("MAX_LOCAL_ATTEMPTS", "2"))
 
 
 def log(msg: str) -> None:
@@ -112,11 +114,11 @@ def choose_ollama_models(task_type: str) -> list[str]:
     return ["qwen2.5-coder:7b", "deepseek-coder:6.7b"]
 
 
-def ollama_generate_edit(model: str, project: Path, spec: str) -> dict[str, Any] | None:
+def ollama_generate_edit(model: str, project: Path, spec: str, target_file: str = "", acceptance: str = "") -> dict[str, Any] | None:
     # Small context only: file list + first matching file content.
     files = [str(p.relative_to(project)) for p in project.rglob("*") if p.is_file() and p.suffix in {".py", ".js", ".ts", ".tsx", ".jsx", ".sh"} and ".git" not in str(p)]
     files = files[:80]
-    target = files[0] if files else None
+    target = target_file or (files[0] if files else None)
     content = ""
     if target:
         try:
@@ -127,9 +129,16 @@ def ollama_generate_edit(model: str, project: Path, spec: str) -> dict[str, Any]
     system = (
         "Du bist ein Coding-Agent. Gib NUR valides JSON zurück: "
         "{\"summary\":\"...\",\"edits\":[{\"path\":\"rel/path\",\"content\":\"full file content\"}]}. "
-        "Maximal 2 Dateien bearbeiten. Keine Markdown-Ausgabe."
+        "Maximal 2 Dateien bearbeiten. Mindestens 1 echte Änderung liefern. Keine Markdown-Ausgabe."
     )
-    user = f"Projekt: {project.name}\nTask: {spec}\nDateien (Auszug): {files[:30]}\nZieldatei: {target}\nAktueller Inhalt:\n{content}"
+    user = (
+        f"Projekt: {project.name}\n"
+        f"Task: {spec}\n"
+        f"Akzeptanzkriterium: {acceptance or 'Mindestens eine funktionale Code-Änderung'}\n"
+        f"Dateien (Auszug): {files[:30]}\n"
+        f"Zieldatei (bevorzugt): {target}\n"
+        f"Aktueller Inhalt:\n{content}"
+    )
 
     # OpenAI-compatible endpoint first
     body = {
@@ -230,18 +239,22 @@ def main() -> int:
         if args.project:
             tasks = [t for t in tasks if t.get("repo") == args.project]
 
+        failed_summary: list[str] = []
         for t in tasks:
+            task_started = time.time()
             task_id = t.get("id", "?")
             repo = t.get("repo", "")
             spec = t.get("spec", "")
             task_type = t.get("type", "implement")
+            target_file = t.get("target_file", "")
+            acceptance = t.get("acceptance", "")
             project = PROJECTS_DIR / repo
             if not project.exists():
                 mark_done(task_id, "none", status="skipped")
                 continue
 
             models = choose_ollama_models(task_type)
-            log(f"[TASK] {task_id} {repo} -> {models[0]} (alt: {models[1]})")
+            log(f"[TASK] {task_id} {repo} -> {models[0]} (alt: {models[1]}) target={target_file or '-'}")
             if args.dry_run:
                 mark_done(task_id, models[0])
                 processed += 1
@@ -249,8 +262,15 @@ def main() -> int:
 
             changed_files: list[str] = []
             used_model = None
+            attempts = 0
             for model in models:
-                result = ollama_generate_edit(model, project, spec)
+                if attempts >= MAX_LOCAL_ATTEMPTS:
+                    break
+                if time.time() - task_started > TASK_TIMEOUT_SEC:
+                    log(f"[TIMEOUT] task {task_id} exceeded {TASK_TIMEOUT_SEC}s")
+                    break
+                attempts += 1
+                result = ollama_generate_edit(model, project, spec, target_file=target_file, acceptance=acceptance)
                 if not result:
                     continue
                 changed_files = apply_edits(project, result.get("edits", []))
@@ -266,19 +286,27 @@ def main() -> int:
                 processed += 1
                 continue
 
-            # fallback to codex only if both local attempts produced no changes
+            # fallback to codex only if local attempts produced no changes
             ok, _ = run_codex_fallback(project, spec)
             if ok:
                 mark_done(task_id, "codex/gpt-5.2-codex")
                 changed_summary.append(f"{repo}: codex fallback changes")
                 processed += 1
             else:
-                log(f"[WARN] task {task_id} produced no changes (qwen+deepseek)")
+                mark_done(task_id, "none", status="failed")
+                failed_summary.append(f"{repo} ({task_id})")
+                log(f"[WARN] task {task_id} failed: no changes after local+fallback")
 
         if changed_summary:
-            send_whatsapp("🦅 BeermannCode Run fertig:\n" + "\n".join(f"• {x}" for x in changed_summary))
+            msg = "🦅 BeermannCode Run fertig:\n" + "\n".join(f"• {x}" for x in changed_summary)
+            if failed_summary:
+                msg += "\n⚠️ Ohne Änderungen: " + ", ".join(failed_summary[:5])
+            send_whatsapp(msg)
         else:
-            send_whatsapp("🦅 BeermannCode Run fertig: Keine Änderungen in diesem Run.")
+            msg = "🦅 BeermannCode Run fertig: Keine Änderungen in diesem Run."
+            if failed_summary:
+                msg += "\n⚠️ Fehlgeschlagen: " + ", ".join(failed_summary[:5])
+            send_whatsapp(msg)
 
         # dynamic chain
         if DYNAMIC_CHAIN:
