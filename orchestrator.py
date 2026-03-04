@@ -273,6 +273,58 @@ def enrich_task_defaults(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return tasks
 
 
+def task_timeout_for_repo(repo: str) -> int:
+    # Heavier repos get slightly more runtime budget
+    if repo in {"TradingBot", "VoiceOpsAI", "Routenplaner", "MegaRAG", "BeermannAI"}:
+        return LARGE_REPO_TIMEOUT_SEC
+    return TASK_TIMEOUT_SEC
+
+
+def split_failed_task(task: dict[str, Any]) -> int:
+    """Create two smaller follow-up tasks for a failed broad task."""
+    if task.get("split_generated"):
+        return 0
+    rows = read_all_rows()
+    now = datetime.now().isoformat()
+    base_repo = task.get("repo", "")
+    base_target = task.get("target_file", "app.py")
+    base_spec = task.get("spec", "Implementiere die Aufgabe")
+    base_acc = task.get("acceptance", "Mindestens 1 funktionale Änderung")
+
+    subtasks = [
+        {
+            "id": os.urandom(4).hex(),
+            "status": "pending",
+            "type": "implement",
+            "repo": base_repo,
+            "spec": f"Teil 1/2: Refactor vorbereiten für {base_spec}",
+            "target_file": base_target,
+            "acceptance": f"Teil 1 erfüllt: {base_acc}",
+            "created": now,
+            "parent_task": task.get("id"),
+        },
+        {
+            "id": os.urandom(4).hex(),
+            "status": "pending",
+            "type": "implement",
+            "repo": base_repo,
+            "spec": f"Teil 2/2: Feature abschließen für {base_spec}",
+            "target_file": base_target,
+            "acceptance": f"Teil 2 erfüllt: {base_acc}",
+            "created": now,
+            "parent_task": task.get("id"),
+        },
+    ]
+
+    # mark parent to avoid repeated splitting
+    for r in rows:
+        if r.get("id") == task.get("id"):
+            r["split_generated"] = True
+    rows.extend(subtasks)
+    save_tasks(rows)
+    return len(subtasks)
+
+
 def auto_refill_queue(min_pending: int = MIN_PENDING_TASKS) -> int:
     rows = read_all_rows()
     pending = [r for r in rows if r.get("status") == "pending"]
@@ -351,11 +403,12 @@ def main() -> int:
             changed_files: list[str] = []
             used_model = None
             attempts = 0
+            task_timeout = task_timeout_for_repo(repo)
             for model in models:
                 if attempts >= MAX_LOCAL_ATTEMPTS:
                     break
-                if time.time() - task_started > TASK_TIMEOUT_SEC:
-                    log(f"[TIMEOUT] task {task_id} exceeded {TASK_TIMEOUT_SEC}s")
+                if time.time() - task_started > task_timeout:
+                    log(f"[TIMEOUT] task {task_id} exceeded {task_timeout}s")
                     break
                 attempts += 1
                 result = ollama_generate_edit(model, project, spec, target_file=target_file, acceptance=acceptance)
@@ -382,8 +435,11 @@ def main() -> int:
                 processed += 1
             else:
                 mark_done(task_id, "none", status="failed", reason="no_changes_after_local_and_fallback")
+                spawned = split_failed_task(t)
                 failed_summary.append(f"{repo} ({task_id})")
                 log(f"[WARN] task {task_id} failed: no changes after local+fallback")
+                if spawned:
+                    log(f"[SPLIT] task {task_id} -> {spawned} subtasks")
 
         if changed_summary:
             msg = "🦅 BeermannCode Run fertig:\n" + "\n".join(f"• {x}" for x in changed_summary)
