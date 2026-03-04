@@ -33,6 +33,7 @@ CHAIN_COOLDOWN_SEC = int(os.getenv("CHAIN_COOLDOWN_SEC", "45"))
 DYNAMIC_CHAIN = os.getenv("DYNAMIC_CHAIN", "true").lower() == "true"
 TASK_TIMEOUT_SEC = int(os.getenv("TASK_TIMEOUT_SEC", "120"))
 MAX_LOCAL_ATTEMPTS = int(os.getenv("MAX_LOCAL_ATTEMPTS", "2"))
+MAX_TASKS_PER_RUN = int(os.getenv("MAX_TASKS_PER_RUN", "4"))
 
 
 def log(msg: str) -> None:
@@ -211,7 +212,7 @@ def send_whatsapp(msg: str) -> None:
     run(["openclaw", "message", "action=send", "channel=whatsapp", f"target={WHATSAPP_TO}", f"message={msg}"])
 
 
-def mark_done(task_id: str, model: str, status: str = "done") -> None:
+def mark_done(task_id: str, model: str, status: str = "done", reason: str = "") -> None:
     rows = read_all_rows()
     now = datetime.now().isoformat()
     for r in rows:
@@ -219,6 +220,8 @@ def mark_done(task_id: str, model: str, status: str = "done") -> None:
             r["status"] = status
             r["completed"] = now
             r["model"] = model
+            if reason:
+                r["reason"] = reason
     save_tasks(rows)
 
 
@@ -278,7 +281,10 @@ def main() -> int:
         tasks = enrich_task_defaults(tasks)
 
         failed_summary: list[str] = []
-        for t in tasks:
+        for idx, t in enumerate(tasks, start=1):
+            if idx > MAX_TASKS_PER_RUN:
+                log(f"[LIMIT] reached MAX_TASKS_PER_RUN={MAX_TASKS_PER_RUN}, remaining queued")
+                break
             task_started = time.time()
             task_id = t.get("id", "?")
             repo = t.get("repo", "")
@@ -288,7 +294,7 @@ def main() -> int:
             acceptance = t.get("acceptance", "")
             project = PROJECTS_DIR / repo
             if not project.exists():
-                mark_done(task_id, "none", status="skipped")
+                mark_done(task_id, "none", status="skipped", reason="project_not_found")
                 continue
 
             models = choose_ollama_models(task_type)
@@ -331,7 +337,7 @@ def main() -> int:
                 changed_summary.append(f"{repo}: codex fallback changes")
                 processed += 1
             else:
-                mark_done(task_id, "none", status="failed")
+                mark_done(task_id, "none", status="failed", reason="no_changes_after_local_and_fallback")
                 failed_summary.append(f"{repo} ({task_id})")
                 log(f"[WARN] task {task_id} failed: no changes after local+fallback")
 
