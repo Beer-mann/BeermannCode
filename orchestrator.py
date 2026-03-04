@@ -34,6 +34,8 @@ DYNAMIC_CHAIN = os.getenv("DYNAMIC_CHAIN", "true").lower() == "true"
 TASK_TIMEOUT_SEC = int(os.getenv("TASK_TIMEOUT_SEC", "120"))
 MAX_LOCAL_ATTEMPTS = int(os.getenv("MAX_LOCAL_ATTEMPTS", "2"))
 MAX_TASKS_PER_RUN = int(os.getenv("MAX_TASKS_PER_RUN", "4"))
+AUTO_REFILL = os.getenv("AUTO_REFILL", "true").lower() == "true"
+MIN_PENDING_TASKS = int(os.getenv("MIN_PENDING_TASKS", "8"))
 
 
 def log(msg: str) -> None:
@@ -225,24 +227,26 @@ def mark_done(task_id: str, model: str, status: str = "done", reason: str = "") 
     save_tasks(rows)
 
 
+REPO_DEFAULTS = {
+    "BCN": ("app.py", "CLI health check implementiert, Exit-Code 0/1 korrekt"),
+    "BeermannAI": ("app.py", "Timeout+Retry aktiv und Fehler sauber behandelt"),
+    "BeermannBot": ("app.py", "Command-Registry + unknown-command fallback vorhanden"),
+    "BeermannCode": ("orchestrator.py", "Task-Metriken werden pro Run geschrieben"),
+    "BeermannHN": ("app.py", "Duplikat-Filter verhindert doppelte News-Einträge"),
+    "BeermannHub": ("app.py", "/health liefert valides JSON mit uptime/version"),
+    "MegaRAG": ("rag_engine.py", "Chunking nutzt min/max + overlap konfigurierbar"),
+    "Routenplaner": ("server.js", "Fallback-Route wird bei OSRM-Fehler genutzt"),
+    "TradingBot": ("main.py", "Risk-Guard limitiert daily loss + open positions"),
+    "VoiceOpsAI": ("src/pipeline.js", "Audio-Validation prüft format/duration/size"),
+}
+
+
 def enrich_task_defaults(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Ensure each task has concrete target_file + acceptance criteria."""
-    repo_defaults = {
-        "BCN": ("app.py", "CLI health check implementiert, Exit-Code 0/1 korrekt"),
-        "BeermannAI": ("app.py", "Timeout+Retry aktiv und Fehler sauber behandelt"),
-        "BeermannBot": ("app.py", "Command-Registry + unknown-command fallback vorhanden"),
-        "BeermannCode": ("orchestrator.py", "Task-Metriken werden pro Run geschrieben"),
-        "BeermannHN": ("app.py", "Duplikat-Filter verhindert doppelte News-Einträge"),
-        "BeermannHub": ("app.py", "/health liefert valides JSON mit uptime/version"),
-        "MegaRAG": ("rag_engine.py", "Chunking nutzt min/max + overlap konfigurierbar"),
-        "Routenplaner": ("server.js", "Fallback-Route wird bei OSRM-Fehler genutzt"),
-        "TradingBot": ("main.py", "Risk-Guard limitiert daily loss + open positions"),
-        "VoiceOpsAI": ("src/pipeline.js", "Audio-Validation prüft format/duration/size"),
-    }
     changed = False
     for t in tasks:
         repo = t.get("repo", "")
-        d_target, d_acc = repo_defaults.get(repo, ("app.py", "Mindestens 1 funktionale Code-Änderung"))
+        d_target, d_acc = REPO_DEFAULTS.get(repo, ("app.py", "Mindestens 1 funktionale Code-Änderung"))
         if not t.get("target_file"):
             t["target_file"] = d_target
             changed = True
@@ -262,6 +266,34 @@ def enrich_task_defaults(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return tasks
 
 
+def auto_refill_queue(min_pending: int = MIN_PENDING_TASKS) -> int:
+    rows = read_all_rows()
+    pending = [r for r in rows if r.get("status") == "pending"]
+    missing = max(0, min_pending - len(pending))
+    if missing == 0:
+        return 0
+
+    now = datetime.now().isoformat()
+    seeded = 0
+    for repo, (target, acceptance) in REPO_DEFAULTS.items():
+        if seeded >= missing:
+            break
+        rows.append({
+            "id": os.urandom(4).hex(),
+            "status": "pending",
+            "type": "implement",
+            "repo": repo,
+            "spec": f"Implementiere eine kleine, produktive Verbesserung in {target} gemäß Akzeptanzkriterium.",
+            "target_file": target,
+            "acceptance": acceptance,
+            "created": now,
+        })
+        seeded += 1
+
+    save_tasks(rows)
+    return seeded
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--tier", type=int, default=3)
@@ -275,6 +307,11 @@ def main() -> int:
     changed_summary: list[str] = []
     processed = 0
     try:
+        if AUTO_REFILL:
+            seeded = auto_refill_queue(MIN_PENDING_TASKS)
+            if seeded:
+                log(f"[REFILL] added {seeded} new tasks to queue")
+
         tasks = load_tasks()
         if args.project:
             tasks = [t for t in tasks if t.get("repo") == args.project]
