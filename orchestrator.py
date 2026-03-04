@@ -36,6 +36,7 @@ MAX_LOCAL_ATTEMPTS = int(os.getenv("MAX_LOCAL_ATTEMPTS", "2"))
 MAX_TASKS_PER_RUN = int(os.getenv("MAX_TASKS_PER_RUN", "4"))
 AUTO_REFILL = os.getenv("AUTO_REFILL", "true").lower() == "true"
 MIN_PENDING_TASKS = int(os.getenv("MIN_PENDING_TASKS", "8"))
+LARGE_REPO_TIMEOUT_SEC = int(os.getenv("LARGE_REPO_TIMEOUT_SEC", "180"))
 
 
 def log(msg: str) -> None:
