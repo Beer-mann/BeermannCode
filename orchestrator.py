@@ -441,16 +441,18 @@ def main() -> int:
                 if spawned:
                     log(f"[SPLIT] task {task_id} -> {spawned} subtasks")
 
+        # Notify only when there is something actionable/meaningful
         if changed_summary:
             msg = "🦅 BeermannCode Run fertig:\n" + "\n".join(f"• {x}" for x in changed_summary)
             if failed_summary:
                 msg += "\n⚠️ Ohne Änderungen: " + ", ".join(failed_summary[:5])
             send_whatsapp(msg)
-        else:
+        elif failed_summary:
             msg = "🦅 BeermannCode Run fertig: Keine Änderungen in diesem Run."
-            if failed_summary:
-                msg += "\n⚠️ Fehlgeschlagen: " + ", ".join(failed_summary[:5])
+            msg += "\n⚠️ Fehlgeschlagen: " + ", ".join(failed_summary[:5])
             send_whatsapp(msg)
+        else:
+            log("[NOTIFY] skipped: no changes and no failures")
 
         # dynamic chain
         if DYNAMIC_CHAIN:
