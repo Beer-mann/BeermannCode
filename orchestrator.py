@@ -211,7 +211,13 @@ def run_codex_fallback(project: Path, spec: str) -> tuple[bool, str]:
 
 
 def send_whatsapp(msg: str) -> None:
-    run(["openclaw", "message", "action=send", "channel=whatsapp", f"target={WHATSAPP_TO}", f"message={msg}"])
+    # Use supported CLI syntax
+    run([
+        "openclaw", "message", "send",
+        "--channel", "whatsapp",
+        "--target", WHATSAPP_TO,
+        "--message", msg,
+    ])
 
 
 def mark_done(task_id: str, model: str, status: str = "done", reason: str = "") -> None:
