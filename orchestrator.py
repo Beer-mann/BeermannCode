@@ -222,6 +222,43 @@ def mark_done(task_id: str, model: str, status: str = "done") -> None:
     save_tasks(rows)
 
 
+def enrich_task_defaults(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Ensure each task has concrete target_file + acceptance criteria."""
+    repo_defaults = {
+        "BCN": ("app.py", "CLI health check implementiert, Exit-Code 0/1 korrekt"),
+        "BeermannAI": ("app.py", "Timeout+Retry aktiv und Fehler sauber behandelt"),
+        "BeermannBot": ("app.py", "Command-Registry + unknown-command fallback vorhanden"),
+        "BeermannCode": ("orchestrator.py", "Task-Metriken werden pro Run geschrieben"),
+        "BeermannHN": ("app.py", "Duplikat-Filter verhindert doppelte News-Einträge"),
+        "BeermannHub": ("app.py", "/health liefert valides JSON mit uptime/version"),
+        "MegaRAG": ("rag_engine.py", "Chunking nutzt min/max + overlap konfigurierbar"),
+        "Routenplaner": ("server.js", "Fallback-Route wird bei OSRM-Fehler genutzt"),
+        "TradingBot": ("main.py", "Risk-Guard limitiert daily loss + open positions"),
+        "VoiceOpsAI": ("src/pipeline.js", "Audio-Validation prüft format/duration/size"),
+    }
+    changed = False
+    for t in tasks:
+        repo = t.get("repo", "")
+        d_target, d_acc = repo_defaults.get(repo, ("app.py", "Mindestens 1 funktionale Code-Änderung"))
+        if not t.get("target_file"):
+            t["target_file"] = d_target
+            changed = True
+        if not t.get("acceptance"):
+            t["acceptance"] = d_acc
+            changed = True
+    if changed:
+        # persist enriched metadata back to queue file
+        rows = read_all_rows()
+        by_id = {t.get("id"): t for t in tasks}
+        for r in rows:
+            tid = r.get("id")
+            if tid in by_id and r.get("status") == "pending":
+                r["target_file"] = by_id[tid].get("target_file")
+                r["acceptance"] = by_id[tid].get("acceptance")
+        save_tasks(rows)
+    return tasks
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--tier", type=int, default=3)
@@ -238,6 +275,7 @@ def main() -> int:
         tasks = load_tasks()
         if args.project:
             tasks = [t for t in tasks if t.get("repo") == args.project]
+        tasks = enrich_task_defaults(tasks)
 
         failed_summary: list[str] = []
         for t in tasks:
