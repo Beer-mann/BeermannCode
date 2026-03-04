@@ -30,7 +30,8 @@ OLLAMA_BASE = os.getenv("OLLAMA_URL", "http://192.168.0.213:11434")
 WHATSAPP_TO = os.getenv("WHATSAPP_TO", "+4917643995085")
 CODEX_FALLBACK = os.getenv("CODEX_FALLBACK", "true").lower() == "true"
 CHAIN_COOLDOWN_SEC = int(os.getenv("CHAIN_COOLDOWN_SEC", "45"))
-DYNAMIC_CHAIN = os.getenv("DYNAMIC_CHAIN", "true").lower() == "true"
+DYNAMIC_CHAIN = os.getenv("DYNAMIC_CHAIN", "false").lower() == "true"
+NOTIFY_ENABLED = os.getenv("NOTIFY_ENABLED", "false").lower() == "true"
 TASK_TIMEOUT_SEC = int(os.getenv("TASK_TIMEOUT_SEC", "120"))
 MAX_LOCAL_ATTEMPTS = int(os.getenv("MAX_LOCAL_ATTEMPTS", "2"))
 MAX_TASKS_PER_RUN = int(os.getenv("MAX_TASKS_PER_RUN", "4"))
@@ -212,6 +213,9 @@ def run_codex_fallback(project: Path, spec: str) -> tuple[bool, str]:
 
 
 def send_whatsapp(msg: str) -> None:
+    if not NOTIFY_ENABLED:
+        log("[NOTIFY] disabled")
+        return
     # Use supported CLI syntax
     run([
         "openclaw", "message", "send",
