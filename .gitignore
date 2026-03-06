@@ -47,3 +47,8 @@ config.json
 *.log
 tmp/
 temp/
+
+.venv/
+venv/
+node_modules/
+__pycache__/

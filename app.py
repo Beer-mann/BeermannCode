@@ -7,6 +7,7 @@ from codeai_platform.modules.generator import GenerationRequest
 
 app = Flask(__name__)
 
+
 LANGUAGE_EXTENSIONS = {
     "python": ".py",
     "javascript": ".js",
@@ -122,4 +123,5 @@ def generate():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5004, debug=False)
+    port = int(os.getenv("BEERMANNCODE_PORT", "5004"))
+    app.run(host="0.0.0.0", port=port, debug=False)
