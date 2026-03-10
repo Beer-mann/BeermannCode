@@ -25,11 +25,11 @@ def run_agent(agent_name: str, cli: str, prompt: str) -> tuple[bool, str]:
     """Run agent via OAuth-authenticated CLI"""
     try:
         if cli == "claude":
-            cmd = ["claude", prompt]
+            cmd = ["claude", "--print", prompt]
         elif cli == "codex":
             cmd = ["codex", "exec", prompt]
         elif cli == "gh":
-            cmd = ["gh", "copilot", "suggest", prompt]
+            cmd = ["gh", "copilot", "suggest", "--target", "shell", prompt]
         else:
             return False, f"Unknown CLI: {cli}"
         
@@ -62,13 +62,13 @@ def main():
     log("")
     
     agents = [
-        ("Task Creator", "claude", "Scan for TODOs and FIXMEs in Python projects"),
-        ("Architecture", "claude", "Design system architecture for improvements"),
-        ("Backend", "codex", "Write Python backend code for REST API"),
-        ("Frontend", "claude", "Design React UI components"),
-        ("Database", "codex", "Write SQL for database schemas"),
-        ("Feature", "claude", "Brainstorm new features"),
-        ("Review", "codex", "Review code for security issues"),
+        ("Task Creator", "claude", "Scan all Python files in /home/shares/beermann/PROJECTS for TODOs and FIXMEs. List top 5."),
+        ("Architecture", "claude", "Design system architecture improvements for a multi-project coding platform. Be concise."),
+        ("Backend", "codex", "Write FastAPI backend code for a REST API with auth and database"),
+        ("Frontend", "claude", "Write React component for a project management dashboard. Show code."),
+        ("Database", "codex", "Write SQLAlchemy models and migrations for a coding platform"),
+        ("Feature", "claude", "Brainstorm 3 new features for a 24/7 coding orchestrator. Be specific."),
+        ("Review", "codex", "Review code quality, security issues and test coverage in Python projects"),
     ]
     
     success = 0
