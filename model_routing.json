@@ -189,28 +189,25 @@
 
     "review": {
       "name": "Review Agent",
+      "config_source": "agents/REVIEW_AGENT.md",
       "primary": {
-        "model": "claude-m5",
+        "model": "claude-code",
         "timeout_sec": 900,
         "target_state": {
           "comprehensive_review": true,
           "approval_decision": "approve|reject",
+          "code_quality_min": 90,
+          "tests_passed": true,
+          "security_ok": true,
           "all_checks_passed": true
-        },
-        "note": "M.D. Configuration - später aktivieren"
-      },
-      "secondary": {
-        "model": "claude-code",
-        "timeout_sec": 600,
-        "target_state": {
-          "code_quality_min": 80,
-          "tests_passed": true
         }
       },
-      "tertiary": {
+      "secondary": {
         "model": "codex:gpt-5.2-codex",
         "timeout_sec": 600,
         "target_state": {
+          "code_quality_min": 80,
+          "tests_passed": true,
           "basic_qa_done": true
         }
       }
@@ -251,15 +248,7 @@
       "quality": "medium",
       "available_24_7": true
     },
-    "claude-m5": {
-      "provider": "anthropic",
-      "model": "claude-m5",
-      "cost": "high",
-      "speed": "medium",
-      "quality": "very_high",
-      "available_24_7": true,
-      "status": "pending_configuration"
-    },
+
     "codex": {
       "provider": "openai",
       "model": "gpt-5.2-codex",

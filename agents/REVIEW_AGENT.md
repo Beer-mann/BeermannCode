@@ -10,8 +10,8 @@
 |---|---|
 | **Typ** | Quality Gate |
 | **Modus** | Reactive (triggered nach Implementation-Agenten) |
-| **Modell** | Claude M.D. (benutzerdefiniert — später) |
-| **Konfiguration** | M.D. File Format (Markdown-basiert) |
+| **Modell** | Claude Code (Primary) + Codex (Secondary) |
+| **Konfiguration** | Diese MD-Datei (REVIEW_AGENT.md) als Rules |
 | **Scope** | Alle 10 Projekte |
 | **Strict Mode** | ✅ JA — alles muss passen |
 | **WhatsApp** | Approval/Reject Status |
@@ -490,62 +490,31 @@ Logs → `/home/shares/beermann/logs/review_agent.log`
 
 ## 🔧 Konfiguration
 
-### Wo du deine M.D. Config erstellst:
+### Review Rules aus dieser MD-Datei
 
-```
-/home/shares/beermann/PROJECTS/BeermannCode/agents/
-├── review_agent_config.md        ← DU ERSTELLST DIESE!
-├── REVIEW_AGENT.md               ← Diese Datei (Dokumentation)
-└── [andere Agent-Dateien]
-```
+Diese Datei (REVIEW_AGENT.md) selbst ist die Konfiguration! 
 
-**Template für deine M.D. Config:**
+Die Review Agent nutzt die Checklisten & Rules direkt aus den Abschnitten:
+- **Code Quality Checks** (Abschnitt 1.1-1.5)
+- **Test Validation** (Abschnitt 2.1-2.4)
+- **Issue Resolution Check** (Abschnitt 3.1-3.2)
+- **Performance Check** (Abschnitt 4.1-4.3)
+- **Documentation** (Abschnitt 5.1-5.2)
+- **Compliance & Standards** (Abschnitt 6.1-6.2)
+- **Review Decision Logic** (Review Decision Logic)
 
-```markdown
-# Review Agent Configuration — M.D. Format
-
-## Overview
-[Deine Übersicht]
+**Keine zusätzliche Datei nötig** — die MD-Datei ist die Config!
 
 ---
 
-## 1. Code Quality Checks
-[Deine Regeln für Code-Qualität]
+## 🎯 Live ab sofort!
 
----
+1. **Review Agent** nutzt diese REVIEW_AGENT.md direkt als Config
+2. **Claude Code CLI** (`claude "Review per agents/REVIEW_AGENT.md"`)
+3. **Validiert alle PRs** gegen die Checklisten in dieser MD-Datei
+4. **Auto-Approval/Rejection** basierend auf Review Decision Logic
 
-## 2. Test Validation
-[Deine Regeln für Tests]
-
----
-
-## 3. Issue Resolution
-[Deine Kriterien für gelöste Issues]
-
----
-
-## 4. Performance
-[Deine Performance-Standards]
-
----
-
-## 5. Security
-[Deine Security-Anforderungen]
-
----
-
-## Review Decision Logic
-[Deine Approval/Rejection Logik]
-```
-
----
-
-## 🎯 Was kommt später
-
-1. **Du erstellst:** `review_agent_config.md` mit deinen M.D. Definitionen
-2. **Review Agent** liest diese M.D. Config
-3. **Review Agent** validiert alle PRs gegen diese Regeln
-4. **Auto-Approval/Rejection** basierend auf M.D.
+**Keine zusätzliche Konfiguration nötig** — es läuft jetzt!
 
 ---
 
@@ -579,6 +548,7 @@ Auto-Push to Main ✅
 
 ---
 
-**Status:** ✅ Template Ready (awaiting M.D. Configuration)  
-**Action:** Niklas erstellt `review_agent_config.md` später  
+**Status:** ✅ **LIVE** (MD-File-basiert, keine zusätzliche Config nötig)  
+**Config Source:** Diese Datei (REVIEW_AGENT.md)  
+**Models:** Claude Code CLI + Codex CLI  
 **Letzte Update:** 2026-03-10

@@ -275,13 +275,13 @@ Try Claude Code → Analyze architecture, identify opportunities
 
 ### 6️⃣ REVIEW AGENT
 
-**Purpose:** Quality Validation & Approval
+**Purpose:** Quality Validation & Approval  
+**Config Source:** `agents/REVIEW_AGENT.md` (MD-File basiert — nicht "Claude M.D.")
 
 | Modell | Typ | Zielzustand | Operationen |
 |--------|-----|-------------|-------------|
-| **Claude M.D.** | Primary | ✅ Comprehensive review | `aider --model claude-m5 "Review code changes"` (später) |
-| **Claude Code** | Secondary | ✅ Falls M.D. nicht verfügbar | `aider --model claude "Quick review"` |
-| **Codex** | Tertiary | ✅ Basic quality checks | `aider --model codex "Quick QA"` |
+| **Claude Code** | Primary | ✅ Comprehensive review per REVIEW_AGENT.md | `claude "Review per agents/REVIEW_AGENT.md rules"` |
+| **Codex** | Secondary | ✅ Basic quality checks | `codex "Quick QA checks"` |
 
 **Zielzustand:**
 ```json
@@ -300,12 +300,16 @@ Try Claude Code → Analyze architecture, identify opportunities
 ```
 PR created by Implementation Agent
   ↓
-Try Claude M.D. → Comprehensive review (später konfiguriert)
-  ├─ Approved → Auto-merge to main
-  ├─ Rejected → Send feedback to Implementation Agent
-  └─ Not available → Fallback to Claude Code
+Load rules from agents/REVIEW_AGENT.md
+  ↓
+Try Claude Code CLI
+  └─ claude "Review gegen Checklist aus REVIEW_AGENT.md"
+  ├─ Approved ✅ → Auto-merge to main
+  ├─ Rejected ❌ → Send feedback to Implementation Agent
+  └─ Timeout → Fallback to Codex
        ↓
-       Try Claude Code → Quick review
+       Try Codex CLI
+       └─ codex "Quick QA"
 ```
 
 ---
@@ -572,8 +576,26 @@ for priority in ["primary", "secondary", "tertiary", "quaternary"]:
     timeout = model_config["timeout_sec"]
     target_state = model_config["target_state"]
     
-    # Try this model
-    result = spawn_aider(model, task, timeout)
+    # Determine which CLI to use
+    if "ollama" in model:
+        # Use AIDER for local Ollama models
+        cmd = f"aider --model {model} --ask '{task}'"
+        result = subprocess.run(cmd, timeout=timeout)
+    
+    elif "claude" in model:
+        # Use Claude CLI
+        cmd = f"claude '{task}'"
+        result = subprocess.run(cmd, timeout=timeout)
+    
+    elif "codex" in model:
+        # Use Codex CLI
+        cmd = f"codex exec '{task}'"
+        result = subprocess.run(cmd, timeout=timeout)
+    
+    elif "copilot" in model:
+        # Use GitHub Copilot CLI
+        cmd = f"gh copilot suggest '{task}'"
+        result = subprocess.run(cmd, timeout=timeout)
     
     # Check target state
     if check_target_state(result, target_state):
@@ -581,6 +603,12 @@ for priority in ["primary", "secondary", "tertiary", "quaternary"]:
     else:
         continue  # Try next model
 ```
+
+**CLI Mapping:**
+- **Ollama** → `aider --model ollama:mistral`
+- **Claude** → `claude` (CLI)
+- **Codex** → `codex exec` (CLI)
+- **Copilot** → `gh copilot suggest` (CLI)
 
 ---
 
