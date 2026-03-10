@@ -28,8 +28,8 @@ def run_agent(agent_name: str, cli: str, prompt: str) -> tuple[bool, str]:
             cmd = ["claude", "--print", prompt]
         elif cli == "codex":
             cmd = ["codex", "exec", prompt]
-        elif cli == "gh":
-            cmd = ["gh", "copilot", "suggest", "--target", "shell", prompt]
+        elif cli == "copilot":
+            cmd = ["copilot", "-p", prompt, "--yolo"]
         else:
             return False, f"Unknown CLI: {cli}"
         
@@ -68,7 +68,7 @@ def main():
         ("Frontend", "claude", "Write React component for a project management dashboard. Show code."),
         ("Database", "codex", "Write SQLAlchemy models and migrations for a coding platform"),
         ("Feature", "claude", "Brainstorm 3 new features for a 24/7 coding orchestrator. Be specific."),
-        ("Review", "codex", "Review code quality, security issues and test coverage in Python projects"),
+        ("Review", "copilot", "Review code quality, security issues and test coverage in Python projects"),
     ]
     
     success = 0
