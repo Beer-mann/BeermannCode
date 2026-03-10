@@ -1,0 +1,230 @@
+{
+  "version": "2.0",
+  "workspace": "/home/shares/beermann",
+  "agents": {
+    "architecture": {
+      "name": "Architecture Agent",
+      "type": "orchestrator",
+      "mode": "continuous_24x7",
+      "scope": "all_projects",
+      "description": "Überwacht alle 10 Projekte, priorisiert Tasks, verteilt Arbeit intelligent",
+      "projects": "all",
+      "model": "claude-code",
+      "tasks": [
+        "task_discovery",
+        "priority_assignment",
+        "conflict_detection",
+        "workload_balancing",
+        "dependency_analysis"
+      ],
+      "interval_minutes": 10,
+      "notifications": {
+        "whatsapp": "hourly_summary",
+        "channel": "whatsapp"
+      }
+    },
+    "backend": {
+      "name": "Backend Agent",
+      "type": "implementation",
+      "domain": "backend",
+      "mode": "continuous_loop",
+      "scope": "all_projects",
+      "description": "Implementiert Code-Changes im Backend (APIs, Services, Business-Logic)",
+      "projects": "all",
+      "models": {
+        "docstrings": "ollama:mistral",
+        "code_tasks": [
+          "claude-code",
+          "codex:gpt-5.2-codex",
+          "github-copilot"
+        ]
+      },
+      "tasks": [
+        "fix_todos",
+        "write_tests",
+        "write_docstrings",
+        "backend_code_implementation",
+        "api_design",
+        "service_optimization"
+      ],
+      "priority_source": "architecture",
+      "auto_push": true,
+      "notifications": {
+        "whatsapp": "hourly_digest",
+        "channel": "whatsapp"
+      }
+    },
+    "frontend": {
+      "name": "Frontend Agent",
+      "type": "implementation",
+      "domain": "frontend",
+      "mode": "continuous_loop",
+      "scope": "all_projects",
+      "description": "Implementiert Code-Changes im Frontend (UI, Components, Styling)",
+      "projects": "all",
+      "models": {
+        "docstrings": "ollama:mistral",
+        "code_tasks": [
+          "claude-code",
+          "codex:gpt-5.2-codex",
+          "github-copilot"
+        ]
+      },
+      "tasks": [
+        "fix_todos",
+        "write_tests",
+        "write_docstrings",
+        "component_implementation",
+        "ui_enhancement",
+        "accessibility_fixes"
+      ],
+      "priority_source": "architecture",
+      "auto_push": true,
+      "notifications": {
+        "whatsapp": "hourly_digest",
+        "channel": "whatsapp"
+      }
+    },
+    "database": {
+      "name": "Database Agent",
+      "type": "implementation",
+      "domain": "database",
+      "mode": "continuous_loop",
+      "scope": "all_projects",
+      "description": "Verwaltet Datenbank-Changes (Schema, Migrations, Optimierungen)",
+      "projects": "all",
+      "models": {
+        "docstrings": "ollama:mistral",
+        "code_tasks": [
+          "claude-code",
+          "codex:gpt-5.2-codex",
+          "github-copilot"
+        ]
+      },
+      "tasks": [
+        "schema_review",
+        "migration_generation",
+        "query_optimization",
+        "index_management",
+        "backup_validation"
+      ],
+      "priority_source": "architecture",
+      "auto_push": true,
+      "notifications": {
+        "whatsapp": "hourly_digest",
+        "channel": "whatsapp"
+      }
+    },
+    "feature": {
+      "name": "Feature Agent",
+      "type": "proposal",
+      "mode": "continuous_24x7",
+      "scope": "all_projects",
+      "description": "Schlägt Features vor, erstellt TODOs, identifiziert Refactorings",
+      "projects": "all",
+      "model": "claude-code",
+      "tasks": [
+        "suggest_features",
+        "create_todos",
+        "refactor_proposals",
+        "code_smell_detection",
+        "improvement_recommendations"
+      ],
+      "interval_minutes": 60,
+      "notifications": {
+        "whatsapp_immediate": true,
+        "whatsapp_digest": "hourly",
+        "channel": "whatsapp"
+      }
+    },
+    "review": {
+      "name": "Review Agent (M.D.)",
+      "type": "quality_gate",
+      "mode": "reactive",
+      "scope": "all_projects",
+      "description": "Validiert alle Code-Changes, reviewt Tests, prüft Issue-Lösung (M.D. Konfiguration)",
+      "projects": "all",
+      "model": "claude-m5",
+      "model_config": "M.D.",
+      "tasks": [
+        "code_review",
+        "test_validation",
+        "issue_resolution_check",
+        "performance_analysis",
+        "security_audit",
+        "approval_decision"
+      ],
+      "trigger": "after_implementation_agents",
+      "strict_mode": true,
+      "requires_tests": true,
+      "requires_validation": true,
+      "notifications": {
+        "whatsapp": "approval_status",
+        "channel": "whatsapp"
+      }
+    }
+  },
+  "workflow": {
+    "order": [
+      "architecture",
+      "backend",
+      "frontend",
+      "database",
+      "feature",
+      "review"
+    ],
+    "parallelization": {
+      "backend": "parallel_with_frontend_database",
+      "frontend": "parallel_with_backend_database",
+      "database": "parallel_with_backend_frontend",
+      "feature": "continuous"
+    }
+  },
+  "models": {
+    "ollama": {
+      "url": "http://192.168.0.213:11434",
+      "models": [
+        "mistral",
+        "qwen2.5-coder",
+        "deepseek-coder",
+        "llama3.2",
+        "gemma3"
+      ],
+      "cost": "free"
+    },
+    "claude-code": {
+      "provider": "anthropic",
+      "model": "claude-opus-4-6",
+      "cost": "medium"
+    },
+    "codex": {
+      "provider": "openai",
+      "model": "gpt-5.2-codex",
+      "cost": "low"
+    },
+    "github-copilot": {
+      "provider": "github",
+      "model": "copilot-inline",
+      "cost": "low"
+    },
+    "claude-m5": {
+      "provider": "anthropic",
+      "model": "claude-m5",
+      "config_file": "M.D.",
+      "status": "pending_configuration",
+      "cost": "high"
+    }
+  },
+  "projects": [
+    "BCN",
+    "BeermannAI",
+    "BeermannBot",
+    "BeermannCode",
+    "BeermannHN",
+    "BeermannHub",
+    "MegaRAG",
+    "Routenplaner",
+    "TradingBot",
+    "VoiceOpsAI"
+  ]
+}
