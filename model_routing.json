@@ -1,0 +1,293 @@
+{
+  "version": "1.0",
+  "description": "Model Routing & Operations - Target States für alle 7 Agenten",
+  "agents": {
+    "task_creator": {
+      "name": "Task Creator Agent",
+      "primary": {
+        "model": "ollama:mistral",
+        "timeout_sec": 300,
+        "command": "aider --model ollama:mistral --ask 'Scan alle Projekte auf TODOs, Test-Gaps, Security-Issues...'",
+        "target_state": {
+          "tasks_created_min": 5,
+          "execution_time_max": 300,
+          "success_rate_min": 0.8
+        }
+      },
+      "secondary": {
+        "model": "claude-haiku",
+        "timeout_sec": 600,
+        "target_state": {
+          "tasks_created_min": 3,
+          "execution_time_max": 600,
+          "success_rate_min": 0.8
+        }
+      },
+      "tertiary": {
+        "model": "codex:gpt-5.2-codex",
+        "timeout_sec": 600,
+        "target_state": {
+          "critical_issues_found": true,
+          "execution_time_max": 600
+        }
+      }
+    },
+    
+    "backend": {
+      "name": "Backend Agent",
+      "primary": {
+        "model": "claude-code",
+        "timeout_sec": 1800,
+        "target_state": {
+          "code_quality_min": 90,
+          "coverage_min": 0.8,
+          "security_issues": 0,
+          "success_rate_min": 0.85
+        }
+      },
+      "secondary": {
+        "model": "codex:gpt-5.2-codex",
+        "timeout_sec": 900,
+        "target_state": {
+          "code_quality_min": 80,
+          "coverage_min": 0.75,
+          "success_rate_min": 0.8
+        }
+      },
+      "tertiary": {
+        "model": "github-copilot",
+        "timeout_sec": 600,
+        "target_state": {
+          "boilerplate_generated": true,
+          "tests_generated": true
+        }
+      },
+      "quaternary": {
+        "model": "ollama:codeqwen",
+        "timeout_sec": 300,
+        "target_state": {
+          "docstrings_complete": true
+        }
+      }
+    },
+    
+    "frontend": {
+      "name": "Frontend Agent",
+      "primary": {
+        "model": "claude-code",
+        "timeout_sec": 1800,
+        "target_state": {
+          "accessibility": "WCAG AA",
+          "coverage_min": 0.8,
+          "responsive": true,
+          "lighthouse_min": 85
+        }
+      },
+      "secondary": {
+        "model": "github-copilot",
+        "timeout_sec": 900,
+        "target_state": {
+          "component_generated": true,
+          "tests_generated": true
+        }
+      },
+      "tertiary": {
+        "model": "codex:gpt-5.2-codex",
+        "timeout_sec": 600,
+        "target_state": {
+          "styling_complete": true
+        }
+      },
+      "quaternary": {
+        "model": "ollama:mistral",
+        "timeout_sec": 300,
+        "target_state": {
+          "jsdoc_complete": true
+        }
+      }
+    },
+
+    "database": {
+      "name": "Database Agent",
+      "primary": {
+        "model": "claude-code",
+        "timeout_sec": 1200,
+        "target_state": {
+          "migration_valid": true,
+          "zero_downtime": true,
+          "rollback_planned": true,
+          "success_rate_min": 0.95
+        }
+      },
+      "secondary": {
+        "model": "codex:gpt-5.2-codex",
+        "timeout_sec": 600,
+        "target_state": {
+          "sql_valid": true,
+          "indexes_analyzed": true
+        }
+      },
+      "tertiary": {
+        "model": "ollama:mistral",
+        "timeout_sec": 300,
+        "target_state": {
+          "migration_basic": true,
+          "comments_added": true
+        }
+      }
+    },
+
+    "feature": {
+      "name": "Feature Agent",
+      "primary": {
+        "model": "claude-code",
+        "timeout_sec": 3600,
+        "target_state": {
+          "ideas_generated_min": 5,
+          "roi_calculated": true,
+          "architecture_analyzed": true
+        }
+      },
+      "secondary": {
+        "model": "codex:gpt-5.2-codex",
+        "timeout_sec": 1800,
+        "target_state": {
+          "ideas_generated_min": 3,
+          "quick_sketches": true
+        }
+      }
+    },
+
+    "architecture": {
+      "name": "Architecture Agent",
+      "primary": {
+        "model": "claude-code",
+        "timeout_sec": 600,
+        "target_state": {
+          "tasks_analyzed_min": 10,
+          "priorities_assigned": 1.0,
+          "conflicts_detected": true,
+          "success_rate_min": 0.95
+        }
+      },
+      "secondary": {
+        "model": "codex:gpt-5.2-codex",
+        "timeout_sec": 480,
+        "target_state": {
+          "tasks_sorted": true,
+          "priorities_assigned": 0.8
+        }
+      },
+      "tertiary": {
+        "model": "ollama:mistral",
+        "timeout_sec": 300,
+        "target_state": {
+          "basic_sorting": true
+        }
+      }
+    },
+
+    "review": {
+      "name": "Review Agent",
+      "primary": {
+        "model": "claude-m5",
+        "timeout_sec": 900,
+        "target_state": {
+          "comprehensive_review": true,
+          "approval_decision": "approve|reject",
+          "all_checks_passed": true
+        },
+        "note": "M.D. Configuration - später aktivieren"
+      },
+      "secondary": {
+        "model": "claude-code",
+        "timeout_sec": 600,
+        "target_state": {
+          "code_quality_min": 80,
+          "tests_passed": true
+        }
+      },
+      "tertiary": {
+        "model": "codex:gpt-5.2-codex",
+        "timeout_sec": 600,
+        "target_state": {
+          "basic_qa_done": true
+        }
+      }
+    }
+  },
+
+  "fallback_strategy": {
+    "on_timeout": "next_model",
+    "on_error": "next_model",
+    "max_retries_per_model": 1,
+    "max_total_retries": 3,
+    "log_failures": true
+  },
+
+  "model_info": {
+    "ollama": {
+      "url": "http://192.168.0.213:11434",
+      "provider": "local",
+      "cost": "free",
+      "speed": "medium",
+      "quality": "medium",
+      "available_24_7": true,
+      "models": ["mistral", "codeqwen", "deepseek-coder", "llama3.2"]
+    },
+    "claude-code": {
+      "provider": "anthropic",
+      "model": "claude-opus-4-6",
+      "cost": "medium-high",
+      "speed": "medium",
+      "quality": "very_high",
+      "available_24_7": true
+    },
+    "claude-haiku": {
+      "provider": "anthropic",
+      "model": "claude-haiku-4-5",
+      "cost": "low",
+      "speed": "fast",
+      "quality": "medium",
+      "available_24_7": true
+    },
+    "claude-m5": {
+      "provider": "anthropic",
+      "model": "claude-m5",
+      "cost": "high",
+      "speed": "medium",
+      "quality": "very_high",
+      "available_24_7": true,
+      "status": "pending_configuration"
+    },
+    "codex": {
+      "provider": "openai",
+      "model": "gpt-5.2-codex",
+      "cost": "low",
+      "speed": "fast",
+      "quality": "high",
+      "available_24_7": true
+    },
+    "github-copilot": {
+      "provider": "github",
+      "model": "copilot-inline",
+      "cost": "low",
+      "speed": "medium",
+      "quality": "medium",
+      "available_24_7": true
+    }
+  },
+
+  "priorities": {
+    "cost_efficiency": "low > medium > high",
+    "speed": "fast > medium > slow",
+    "quality": "very_high > high > medium",
+    "decision": "Quality > Speed > Cost"
+  },
+
+  "implementation": {
+    "status": "ready",
+    "file": "MODEL_ROUTING.md",
+    "integration": "orchestrator.py (Step: Model Selection)"
+  }
+}
