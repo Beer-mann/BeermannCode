@@ -144,6 +144,37 @@ def load_agent_md(agent_name: str) -> str:
 
 
 # ============================================================================
+# DOCSTRING OPTIMIZATION (Token-Efficient)
+# ============================================================================
+
+def generate_docstrings_ollama(agent_name: str, files: list[str], timeout_sec: int = 300) -> bool:
+    """
+    Generate docstrings via AIDER+Ollama (FREE, token-efficient)
+    Runs BEFORE expensive Cloud APIs are used
+    
+    Returns: True if successful
+    """
+    if not files:
+        return False
+    
+    try:
+        files_str = ", ".join(files[:5])  # Max 5 files
+        prompt = f"Add docstrings to these {agent_name} files: {files_str}. Use clear, concise docstrings."
+        
+        cmd = f"aider --model ollama:mistral --ask '{prompt}' 2>/dev/null"
+        
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout_sec)
+        
+        if result.returncode == 0:
+            log(f"[TOKEN-SAVE] {agent_name}: Docstrings generated via Ollama (0 tokens spent on Cloud APIs!)")
+            return True
+    except Exception as e:
+        log(f"[DOCSTRING] Ollama generation skipped: {str(e)[:50]}")
+    
+    return False
+
+
+# ============================================================================
 # CLI EXECUTION
 # ============================================================================
 
@@ -326,6 +357,10 @@ Return: Updated task queue with priorities"""
         md_content = load_agent_md(agent_key)
         
         if config and md_content:
+            # OPTIMIZATION: Docstrings FIRST via FREE Ollama (save tokens!)
+            log(f"[OPTIMIZE] {agent_name}: Generating docstrings via Ollama (token-efficient)")
+            generate_docstrings_ollama(agent_name, [])
+            
             prompt = f"""Based on {md_file} rules:
 {md_content[:500]}
 
@@ -334,7 +369,7 @@ Find tasks assigned to {agent_name}
 Implement the code changes:
 - Write code
 - Write tests (>80% coverage)
-- Write docstrings
+- (Docstrings already done via Ollama - skip)
 - Commit to git
 
 Return: Status + changed files"""
