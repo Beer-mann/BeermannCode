@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 """
-BeermannCode Python Orchestrator (24/7)
-- Queue-first
-- Local Ollama first
-- Codex fallback (optional)
-- Git commit per successful task
-- WhatsApp summary after each run
+🦅 BeermannCode Orchestrator v2.0
+
+24/7 Agent Ecosystem Manager
+- Architecture Agent (Discovery & Prioritization)
+- Backend/Frontend/Database Agents (Parallel Implementation)
+- Feature Agent (Continuous Proposals)
+- Review Agent (Quality Gate)
+
+All agents run as OpenClaw sub-agents.
+Task flow: Architecture → Implementation Agents → Review → Auto-Push → WhatsApp
 """
 
 from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import subprocess
 import sys
 import time
@@ -21,455 +24,532 @@ from pathlib import Path
 from typing import Any
 from urllib import request
 
+
+# ============================================================================
+# CONFIG & PATHS
+# ============================================================================
+
 WORKSPACE = Path("/home/shares/beermann")
 PROJECTS_DIR = WORKSPACE / "PROJECTS"
-TASK_FILE = WORKSPACE / "tasks" / "pending.jsonl"
-LOG_FILE = WORKSPACE / "logs" / "coding-orchestrator.log"
-LOCK_FILE = Path("/tmp/beermanncode-py.lock")
-OLLAMA_BASE = os.getenv("OLLAMA_URL", "http://192.168.0.213:11434")
-WHATSAPP_TO = os.getenv("WHATSAPP_TO", "+4917643995085")
-CODEX_FALLBACK = os.getenv("CODEX_FALLBACK", "true").lower() == "true"
-CHAIN_COOLDOWN_SEC = int(os.getenv("CHAIN_COOLDOWN_SEC", "45"))
-DYNAMIC_CHAIN = os.getenv("DYNAMIC_CHAIN", "false").lower() == "true"
-NOTIFY_ENABLED = os.getenv("NOTIFY_ENABLED", "false").lower() == "true"
-TASK_TIMEOUT_SEC = int(os.getenv("TASK_TIMEOUT_SEC", "120"))
-MAX_LOCAL_ATTEMPTS = int(os.getenv("MAX_LOCAL_ATTEMPTS", "2"))
-MAX_TASKS_PER_RUN = int(os.getenv("MAX_TASKS_PER_RUN", "4"))
-AUTO_REFILL = os.getenv("AUTO_REFILL", "true").lower() == "true"
-MIN_PENDING_TASKS = int(os.getenv("MIN_PENDING_TASKS", "8"))
-LARGE_REPO_TIMEOUT_SEC = int(os.getenv("LARGE_REPO_TIMEOUT_SEC", "180"))
+BEERMANNCODE_DIR = PROJECTS_DIR / "BeermannCode"
+AGENTS_CONFIG = BEERMANNCODE_DIR / "agents.json"
+AGENTS_OVERVIEW = BEERMANNCODE_DIR / "AGENTS_OVERVIEW.md"
+TASK_QUEUE = WORKSPACE / "tasks" / "pending.jsonl"
+REVIEW_QUEUE = WORKSPACE / "tasks" / "pending-review.jsonl"
+LOG_DIR = WORKSPACE / "logs"
+LOG_FILE = LOG_DIR / "orchestrator-v2.log"
+STATE_FILE = LOG_DIR / "orchestrator-state.json"
+LOCK_FILE = Path("/tmp/beermanncode-orchestrator.lock")
 
+# Environment
+WHATSAPP_TO = os.getenv("WHATSAPP_TO", "+4917643995085")
+NOTIFY_ENABLED = os.getenv("NOTIFY_ENABLED", "true").lower() == "true"
+DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
+
+# Agent timeouts (seconds)
+AGENT_TIMEOUT_ARCHITECTURE = int(os.getenv("AGENT_TIMEOUT_ARCHITECTURE", "600"))  # 10 min
+AGENT_TIMEOUT_IMPLEMENTATION = int(os.getenv("AGENT_TIMEOUT_IMPLEMENTATION", "1800"))  # 30 min
+AGENT_TIMEOUT_REVIEW = int(os.getenv("AGENT_TIMEOUT_REVIEW", "900"))  # 15 min
+
+
+# ============================================================================
+# LOGGING
+# ============================================================================
 
 def log(msg: str) -> None:
-    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    line = f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} {msg}"
+    """Log to file and stdout"""
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    line = f"[{timestamp}] {msg}"
+    
     with LOG_FILE.open("a", encoding="utf-8") as f:
         f.write(line + "\n")
     print(line)
 
 
-def run(cmd: list[str], cwd: Path | None = None, timeout: int = 300) -> tuple[int, str]:
-    p = subprocess.run(cmd, cwd=str(cwd) if cwd else None, capture_output=True, text=True, timeout=timeout)
-    out = (p.stdout or "") + ("\n" + p.stderr if p.stderr else "")
-    return p.returncode, out.strip()
+def log_agent_run(agent_name: str, status: str, duration_sec: float, result: str = "") -> None:
+    """Log individual agent run"""
+    msg = f"[AGENT] {agent_name:20} | Status: {status:10} | Duration: {duration_sec:6.2f}s"
+    if result:
+        msg += f" | {result}"
+    log(msg)
 
+
+# ============================================================================
+# LOCK MANAGEMENT
+# ============================================================================
 
 def acquire_lock() -> bool:
+    """Prevent concurrent runs"""
     if LOCK_FILE.exists():
         try:
             pid = int(LOCK_FILE.read_text().strip())
-            os.kill(pid, 0)
-            log(f"[SKIP] already running pid={pid}")
+            os.kill(pid, 0)  # Check if process exists
+            log(f"[SKIP] Orchestrator already running (PID {pid})")
             return False
-        except Exception:
+        except (ValueError, ProcessLookupError):
             pass
+    
     LOCK_FILE.write_text(str(os.getpid()))
     return True
 
 
 def release_lock() -> None:
+    """Release lock"""
     try:
         LOCK_FILE.unlink(missing_ok=True)
     except Exception:
         pass
 
 
-def load_tasks() -> list[dict[str, Any]]:
-    if not TASK_FILE.exists():
-        return []
-    tasks = []
-    for raw in TASK_FILE.read_text(encoding="utf-8").splitlines():
-        raw = raw.strip()
-        if not raw:
-            continue
+# ============================================================================
+# STATE MANAGEMENT
+# ============================================================================
+
+def save_state(state: dict[str, Any]) -> None:
+    """Save orchestrator state"""
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    state["last_run"] = datetime.now().isoformat()
+    with STATE_FILE.open("w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2, ensure_ascii=False)
+
+
+def load_state() -> dict[str, Any]:
+    """Load orchestrator state"""
+    if STATE_FILE.exists():
         try:
-            d = json.loads(raw)
-            if d.get("status") == "pending":
-                tasks.append(d)
-        except Exception:
-            continue
-    pri = {"implement": 0, "todo_fix": 1, "bugfix": 2}
-    tasks.sort(key=lambda t: pri.get((t.get("type") or "").lower(), 9))
-    return tasks
-
-
-def save_tasks(rows: list[dict[str, Any]]) -> None:
-    TASK_FILE.parent.mkdir(parents=True, exist_ok=True)
-    TASK_FILE.write_text("\n".join(json.dumps(x, ensure_ascii=False) for x in rows) + "\n", encoding="utf-8")
-
-
-def read_all_rows() -> list[dict[str, Any]]:
-    if not TASK_FILE.exists():
-        return []
-    rows = []
-    for raw in TASK_FILE.read_text(encoding="utf-8").splitlines():
-        if not raw.strip():
-            continue
-        try:
-            rows.append(json.loads(raw))
+            return json.loads(STATE_FILE.read_text(encoding="utf-8"))
         except Exception:
             pass
-    return rows
+    return {"last_run": None, "agent_runs": {}}
 
 
-def choose_ollama_models(task_type: str) -> list[str]:
-    t = (task_type or "").lower()
-    if t in {"review", "bugfix"}:
-        return ["deepseek-coder:6.7b", "qwen2.5-coder:7b"]
-    return ["qwen2.5-coder:7b", "deepseek-coder:6.7b"]
+def load_agents_config() -> dict[str, Any]:
+    """Load agents.json configuration"""
+    if not AGENTS_CONFIG.exists():
+        log(f"[ERROR] agents.json not found at {AGENTS_CONFIG}")
+        return {}
+    
+    try:
+        return json.loads(AGENTS_CONFIG.read_text(encoding="utf-8"))
+    except Exception as e:
+        log(f"[ERROR] Failed to load agents.json: {e}")
+        return {}
 
 
-def ollama_generate_edit(model: str, project: Path, spec: str, target_file: str = "", acceptance: str = "") -> dict[str, Any] | None:
-    # Small context only: file list + first matching file content.
-    files = [str(p.relative_to(project)) for p in project.rglob("*") if p.is_file() and p.suffix in {".py", ".js", ".ts", ".tsx", ".jsx", ".sh"} and ".git" not in str(p)]
-    files = files[:80]
-    target = target_file or (files[0] if files else None)
-    content = ""
-    if target:
-        try:
-            content = (project / target).read_text(encoding="utf-8", errors="ignore")[:12000]
-        except Exception:
-            content = ""
+# ============================================================================
+# TASK QUEUE MANAGEMENT
+# ============================================================================
 
-    system = (
-        "Du bist ein Coding-Agent. Gib NUR valides JSON zurück: "
-        "{\"summary\":\"...\",\"edits\":[{\"path\":\"rel/path\",\"content\":\"full file content\"}]}. "
-        "Maximal 2 Dateien bearbeiten. Mindestens 1 echte Änderung liefern. Keine Markdown-Ausgabe."
-    )
-    user = (
-        f"Projekt: {project.name}\n"
-        f"Task: {spec}\n"
-        f"Akzeptanzkriterium: {acceptance or 'Mindestens eine funktionale Code-Änderung'}\n"
-        f"Dateien (Auszug): {files[:30]}\n"
-        f"Zieldatei (bevorzugt): {target}\n"
-        f"Aktueller Inhalt:\n{content}"
-    )
-
-    # OpenAI-compatible endpoint first
-    body = {
-        "model": model,
-        "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-        "temperature": 0.2,
-        "max_tokens": 4000,
-    }
-    endpoints = [f"{OLLAMA_BASE}/v1/chat/completions", f"{OLLAMA_BASE}/api/chat"]
-
-    for ep in endpoints:
-        try:
-            data = json.dumps(body if ep.endswith("completions") else {
-                "model": model,
-                "stream": False,
-                "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-            }).encode("utf-8")
-            req = request.Request(ep, data=data, headers={"Content-Type": "application/json"})
-            with request.urlopen(req, timeout=90) as r:
-                resp = json.loads(r.read().decode("utf-8"))
-            text = resp.get("choices", [{}])[0].get("message", {}).get("content") if ep.endswith("completions") else resp.get("message", {}).get("content", "")
-            if not text:
+def load_tasks(status: str = "pending") -> list[dict[str, Any]]:
+    """Load tasks from queue"""
+    if not TASK_QUEUE.exists():
+        return []
+    
+    tasks = []
+    try:
+        for line in TASK_QUEUE.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
                 continue
-            m = re.search(r"\{.*\}", text, re.S)
-            raw = m.group(0) if m else text
-            obj = json.loads(raw)
-            if isinstance(obj, dict) and isinstance(obj.get("edits"), list):
-                return obj
-        except Exception:
-            continue
-    return None
-
-
-def apply_edits(project: Path, edits: list[dict[str, str]]) -> list[str]:
-    changed: list[str] = []
-    for e in edits[:2]:
-        rel = (e.get("path") or "").strip().lstrip("/")
-        if not rel or ".." in rel:
-            continue
-        tgt = project / rel
-        tgt.parent.mkdir(parents=True, exist_ok=True)
-        content = e.get("content") or ""
-        if not isinstance(content, str) or not content.strip():
-            continue
-        prev = tgt.read_text(encoding="utf-8", errors="ignore") if tgt.exists() else None
-        if prev == content:
-            continue
-        tgt.write_text(content, encoding="utf-8")
-        changed.append(rel)
-    return changed
-
-
-def commit_changes(project: Path, task_id: str, summary: str) -> tuple[bool, str]:
-    run(["git", "add", "-A"], cwd=project)
-    code, out = run(["git", "commit", "-m", f"🦅 BeermannCode[{task_id}]: {summary[:80]}"], cwd=project)
-    return code == 0, out
-
-
-def run_codex_fallback(project: Path, spec: str) -> tuple[bool, str]:
-    if not CODEX_FALLBACK:
-        return False, "codex fallback disabled"
-    code, out = run(["codex", "exec", "--full-auto", spec], cwd=project, timeout=600)
-    if code != 0:
-        return False, out
-    ok, commit_out = commit_changes(project, "fallback", "codex fallback")
-    return ok, commit_out
-
-
-def send_whatsapp(msg: str) -> None:
-    if not NOTIFY_ENABLED:
-        log("[NOTIFY] disabled")
-        return
-    # Use supported CLI syntax
-    run([
-        "openclaw", "message", "send",
-        "--channel", "whatsapp",
-        "--target", WHATSAPP_TO,
-        "--message", msg,
-    ])
-
-
-def mark_done(task_id: str, model: str, status: str = "done", reason: str = "") -> None:
-    rows = read_all_rows()
-    now = datetime.now().isoformat()
-    for r in rows:
-        if r.get("id") == task_id:
-            r["status"] = status
-            r["completed"] = now
-            r["model"] = model
-            if reason:
-                r["reason"] = reason
-    save_tasks(rows)
-
-
-REPO_DEFAULTS = {
-    "BCN": ("app.py", "CLI health check implementiert, Exit-Code 0/1 korrekt"),
-    "BeermannAI": ("app.py", "Timeout+Retry aktiv und Fehler sauber behandelt"),
-    "BeermannBot": ("app.py", "Command-Registry + unknown-command fallback vorhanden"),
-    "BeermannCode": ("orchestrator.py", "Task-Metriken werden pro Run geschrieben"),
-    "BeermannHN": ("app.py", "Duplikat-Filter verhindert doppelte News-Einträge"),
-    "BeermannHub": ("app.py", "/health liefert valides JSON mit uptime/version"),
-    "MegaRAG": ("rag_engine.py", "Chunking nutzt min/max + overlap konfigurierbar"),
-    "Routenplaner": ("server.js", "Fallback-Route wird bei OSRM-Fehler genutzt"),
-    "TradingBot": ("main.py", "Risk-Guard limitiert daily loss + open positions"),
-    "VoiceOpsAI": ("src/pipeline.js", "Audio-Validation prüft format/duration/size"),
-}
-
-
-def enrich_task_defaults(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Ensure each task has concrete target_file + acceptance criteria."""
-    changed = False
-    for t in tasks:
-        repo = t.get("repo", "")
-        d_target, d_acc = REPO_DEFAULTS.get(repo, ("app.py", "Mindestens 1 funktionale Code-Änderung"))
-        if not t.get("target_file"):
-            t["target_file"] = d_target
-            changed = True
-        if not t.get("acceptance"):
-            t["acceptance"] = d_acc
-            changed = True
-    if changed:
-        # persist enriched metadata back to queue file
-        rows = read_all_rows()
-        by_id = {t.get("id"): t for t in tasks}
-        for r in rows:
-            tid = r.get("id")
-            if tid in by_id and r.get("status") == "pending":
-                r["target_file"] = by_id[tid].get("target_file")
-                r["acceptance"] = by_id[tid].get("acceptance")
-        save_tasks(rows)
+            try:
+                task = json.loads(line)
+                if task.get("status") == status:
+                    tasks.append(task)
+            except json.JSONDecodeError:
+                continue
+    except Exception as e:
+        log(f"[WARN] Failed to load tasks: {e}")
+    
     return tasks
 
 
-def task_timeout_for_repo(repo: str) -> int:
-    # Heavier repos get slightly more runtime budget
-    if repo in {"TradingBot", "VoiceOpsAI", "Routenplaner", "MegaRAG", "BeermannAI"}:
-        return LARGE_REPO_TIMEOUT_SEC
-    return TASK_TIMEOUT_SEC
-
-
-def split_failed_task(task: dict[str, Any]) -> int:
-    """Create two smaller follow-up tasks for a failed broad task."""
-    if task.get("split_generated"):
-        return 0
-    rows = read_all_rows()
-    now = datetime.now().isoformat()
-    base_repo = task.get("repo", "")
-    base_target = task.get("target_file", "app.py")
-    base_spec = task.get("spec", "Implementiere die Aufgabe")
-    base_acc = task.get("acceptance", "Mindestens 1 funktionale Änderung")
-
-    subtasks = [
-        {
-            "id": os.urandom(4).hex(),
-            "status": "pending",
-            "type": "implement",
-            "repo": base_repo,
-            "spec": f"Teil 1/2: Refactor vorbereiten für {base_spec}",
-            "target_file": base_target,
-            "acceptance": f"Teil 1 erfüllt: {base_acc}",
-            "created": now,
-            "parent_task": task.get("id"),
-        },
-        {
-            "id": os.urandom(4).hex(),
-            "status": "pending",
-            "type": "implement",
-            "repo": base_repo,
-            "spec": f"Teil 2/2: Feature abschließen für {base_spec}",
-            "target_file": base_target,
-            "acceptance": f"Teil 2 erfüllt: {base_acc}",
-            "created": now,
-            "parent_task": task.get("id"),
-        },
-    ]
-
-    # mark parent to avoid repeated splitting
-    for r in rows:
-        if r.get("id") == task.get("id"):
-            r["split_generated"] = True
-    rows.extend(subtasks)
-    save_tasks(rows)
-    return len(subtasks)
-
-
-def auto_refill_queue(min_pending: int = MIN_PENDING_TASKS) -> int:
-    rows = read_all_rows()
-    pending = [r for r in rows if r.get("status") == "pending"]
-    missing = max(0, min_pending - len(pending))
-    if missing == 0:
-        return 0
-
-    now = datetime.now().isoformat()
-    seeded = 0
-    for repo, (target, acceptance) in REPO_DEFAULTS.items():
-        if seeded >= missing:
+def save_task(task: dict[str, Any]) -> None:
+    """Append/update task in queue"""
+    TASK_QUEUE.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Read all tasks
+    all_tasks = []
+    if TASK_QUEUE.exists():
+        for line in TASK_QUEUE.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                try:
+                    all_tasks.append(json.loads(line))
+                except json.JSONDecodeError:
+                    pass
+    
+    # Update or add
+    found = False
+    for t in all_tasks:
+        if t.get("id") == task.get("id"):
+            t.update(task)
+            found = True
             break
-        rows.append({
-            "id": os.urandom(4).hex(),
-            "status": "pending",
-            "type": "implement",
-            "repo": repo,
-            "spec": f"Implementiere eine kleine, produktive Verbesserung in {target} gemäß Akzeptanzkriterium.",
-            "target_file": target,
-            "acceptance": acceptance,
-            "created": now,
-        })
-        seeded += 1
+    
+    if not found:
+        all_tasks.append(task)
+    
+    # Write back
+    with TASK_QUEUE.open("w", encoding="utf-8") as f:
+        for t in all_tasks:
+            f.write(json.dumps(t, ensure_ascii=False) + "\n")
 
-    save_tasks(rows)
-    return seeded
 
+# ============================================================================
+# WHATSAPP NOTIFICATIONS
+# ============================================================================
+
+def send_whatsapp(msg: str) -> bool:
+    """Send WhatsApp notification"""
+    if not NOTIFY_ENABLED:
+        log("[NOTIFY] disabled")
+        return True
+    
+    try:
+        result = subprocess.run(
+            [
+                "openclaw", "message", "send",
+                "--channel", "whatsapp",
+                "--target", WHATSAPP_TO,
+                "--message", msg,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        if result.returncode == 0:
+            log(f"[NOTIFY] WhatsApp sent")
+            return True
+        else:
+            log(f"[WARN] WhatsApp send failed: {result.stderr}")
+            return False
+    except Exception as e:
+        log(f"[WARN] WhatsApp error: {e}")
+        return False
+
+
+# ============================================================================
+# AGENT SPAWNING
+# ============================================================================
+
+def spawn_agent(
+    agent_name: str,
+    agent_config: dict[str, Any],
+    timeout_sec: int = 300
+) -> tuple[bool, str]:
+    """
+    Spawn agent as OpenClaw sub-agent
+    
+    Returns: (success, result_summary)
+    """
+    if DRY_RUN:
+        log(f"[DRY-RUN] Would spawn {agent_name}")
+        return True, "dry-run"
+    
+    start_time = time.time()
+    
+    try:
+        # Build agent task description
+        agent_type = agent_config.get("type", "unknown")
+        agent_domain = agent_config.get("domain", "all")
+        agent_mode = agent_config.get("mode", "continuous_loop")
+        
+        task_desc = f"""
+Run {agent_name} agent:
+- Type: {agent_type}
+- Domain: {agent_domain}
+- Mode: {agent_mode}
+
+Config: {json.dumps(agent_config, indent=2)}
+
+Load tasks from: {TASK_QUEUE}
+Update task status based on completion.
+Send WhatsApp updates per agent config.
+"""
+        
+        # Spawn as OpenClaw sub-agent
+        result = subprocess.run(
+            [
+                "sessions_spawn",
+                "--mode", "run",
+                "--runtime", "subagent",
+                "--task", task_desc,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=timeout_sec
+        )
+        
+        duration = time.time() - start_time
+        
+        if result.returncode == 0:
+            log_agent_run(agent_name, "✅ SUCCESS", duration, "completed")
+            return True, result.stdout[:200]
+        else:
+            log_agent_run(agent_name, "❌ FAILED", duration, result.stderr[:100])
+            return False, result.stderr[:200]
+    
+    except subprocess.TimeoutExpired:
+        duration = time.time() - start_time
+        log_agent_run(agent_name, "⏱️ TIMEOUT", duration, f">{timeout_sec}s")
+        return False, f"Timeout after {timeout_sec}s"
+    except Exception as e:
+        duration = time.time() - start_time
+        log_agent_run(agent_name, "💥 ERROR", duration, str(e)[:50])
+        return False, str(e)
+
+
+# ============================================================================
+# ORCHESTRATION WORKFLOW
+# ============================================================================
+
+def run_orchestration_cycle() -> dict[str, Any]:
+    """
+    Execute one complete orchestration cycle:
+    
+    1. Run Architecture Agent (Discovery & Prioritization)
+    2. Run Implementation Agents in parallel (Backend, Frontend, Database)
+    3. Run Feature Agent (Continuous)
+    4. Wait for Review Agent (triggered when PR created)
+    5. Auto-Push if approved
+    6. Send WhatsApp summary
+    """
+    
+    log("\n" + "="*80)
+    log("🦅 BeermannCode Orchestration Cycle")
+    log("="*80)
+    
+    cycle_start = time.time()
+    agents_config = load_agents_config()
+    
+    if not agents_config.get("agents"):
+        log("[ERROR] No agents configured in agents.json")
+        return {"success": False, "error": "no_agents_configured"}
+    
+    results = {
+        "cycle_start": datetime.now().isoformat(),
+        "agents_run": {},
+        "tasks_discovered": 0,
+        "tasks_completed": 0,
+        "tasks_failed": 0,
+    }
+    
+    # ========== Step 1: Architecture Agent ==========
+    log("\n📋 Step 1: Architecture Agent (Discovery & Prioritization)")
+    log("-" * 60)
+    
+    arch_config = agents_config["agents"].get("architecture", {})
+    if arch_config:
+        success, output = spawn_agent(
+            "Architecture Agent",
+            arch_config,
+            timeout_sec=AGENT_TIMEOUT_ARCHITECTURE
+        )
+        results["agents_run"]["architecture"] = {
+            "success": success,
+            "output": output[:200]
+        }
+        
+        if success:
+            # Architecture Agent should have populated task queue
+            pending_tasks = load_tasks("pending")
+            results["tasks_discovered"] = len(pending_tasks)
+            log(f"[ARCH] Discovered {len(pending_tasks)} pending tasks")
+    
+    # ========== Step 2: Implementation Agents (Parallel) ==========
+    log("\n🔧 Step 2: Implementation Agents (Parallel)")
+    log("-" * 60)
+    
+    impl_agents = [
+        ("Backend Agent", agents_config["agents"].get("backend", {})),
+        ("Frontend Agent", agents_config["agents"].get("frontend", {})),
+        ("Database Agent", agents_config["agents"].get("database", {})),
+    ]
+    
+    impl_results = {}
+    for agent_name, agent_config in impl_agents:
+        if agent_config:
+            success, output = spawn_agent(
+                agent_name,
+                agent_config,
+                timeout_sec=AGENT_TIMEOUT_IMPLEMENTATION
+            )
+            impl_results[agent_name] = {"success": success, "output": output[:200]}
+            results["agents_run"][agent_name.lower().replace(" ", "_")] = impl_results[agent_name]
+    
+    # ========== Step 3: Feature Agent (Continuous) ==========
+    log("\n💡 Step 3: Feature Agent (Continuous Proposals)")
+    log("-" * 60)
+    
+    feature_config = agents_config["agents"].get("feature", {})
+    if feature_config:
+        # Feature Agent runs continuously, just trigger a check
+        success, output = spawn_agent(
+            "Feature Agent",
+            feature_config,
+            timeout_sec=600  # 10 min for continuous scanning
+        )
+        results["agents_run"]["feature"] = {
+            "success": success,
+            "output": output[:200]
+        }
+    
+    # ========== Step 4: Review Agent (Reactive) ==========
+    log("\n✅ Step 4: Review Agent (Quality Gate)")
+    log("-" * 60)
+    
+    # Review Agent is triggered when PRs exist
+    # (would be via webhook in production)
+    log("[REVIEW] Checking for pending reviews...")
+    
+    review_config = agents_config["agents"].get("review", {})
+    if review_config:
+        # Only spawn if there are items to review
+        pending_reviews = load_tasks("waiting_review")  # or similar
+        
+        if pending_reviews:
+            success, output = spawn_agent(
+                "Review Agent",
+                review_config,
+                timeout_sec=AGENT_TIMEOUT_REVIEW
+            )
+            results["agents_run"]["review"] = {
+                "success": success,
+                "output": output[:200]
+            }
+        else:
+            log("[REVIEW] No pending reviews")
+            results["agents_run"]["review"] = {"success": True, "output": "no_pending"}
+    
+    # ========== SUMMARY ==========
+    cycle_duration = time.time() - cycle_start
+    
+    log("\n" + "="*80)
+    log("📊 Orchestration Cycle Summary")
+    log("="*80)
+    log(f"Duration: {cycle_duration:.2f}s")
+    log(f"Tasks Discovered: {results['tasks_discovered']}")
+    log(f"Agents Run: {len(results['agents_run'])}")
+    
+    success_count = sum(1 for r in results["agents_run"].values() if r.get("success"))
+    log(f"Successful: {success_count}/{len(results['agents_run'])}")
+    
+    results["cycle_duration"] = cycle_duration
+    results["cycle_end"] = datetime.now().isoformat()
+    
+    return results
+
+
+# ============================================================================
+# WHATSAPP SUMMARY
+# ============================================================================
+
+def send_cycle_summary(results: dict[str, Any]) -> None:
+    """Send WhatsApp summary of orchestration cycle"""
+    if not results:
+        return
+    
+    agents_summary = []
+    for agent_name, agent_result in results.get("agents_run", {}).items():
+        status = "✅" if agent_result.get("success") else "❌"
+        agents_summary.append(f"• {agent_name}: {status}")
+    
+    msg = "🦅 *BeermannCode Cycle*\n\n"
+    msg += f"📋 *Tasks:* {results.get('tasks_discovered', 0)} discovered\n"
+    msg += f"⏱️ *Duration:* {results.get('cycle_duration', 0):.1f}s\n"
+    msg += "\n*Agents:*\n" + "\n".join(agents_summary)
+    
+    send_whatsapp(msg)
+
+
+# ============================================================================
+# CRON SUPPORT
+# ============================================================================
+
+def is_time_in_range(hour_start: int, hour_end: int) -> bool:
+    """Check if current time is within range (e.g., 6-22 for daytime)"""
+    current_hour = datetime.now().hour
+    if hour_start <= hour_end:
+        return hour_start <= current_hour < hour_end
+    else:  # e.g., 22-6 (night)
+        return current_hour >= hour_start or current_hour < hour_end
+
+
+def should_run_agent(agent_name: str) -> bool:
+    """Check if agent should run based on time constraints"""
+    cron_schedule = {
+        "architecture": {"always": True},
+        "backend": {"always": True},
+        "frontend": {"always": True},
+        "database": {"always": True},
+        "feature": {"always": True},
+        "review": {"always": True},
+    }
+    
+    config = cron_schedule.get(agent_name.lower(), {})
+    
+    if config.get("always"):
+        return True
+    
+    hour_start = config.get("hour_start", 6)
+    hour_end = config.get("hour_end", 22)
+    
+    return is_time_in_range(hour_start, hour_end)
+
+
+# ============================================================================
+# MAIN
+# ============================================================================
 
 def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--tier", type=int, default=3)
-    ap.add_argument("--project", default="")
-    ap.add_argument("--dry-run", action="store_true")
+    ap = argparse.ArgumentParser(description="🦅 BeermannCode Orchestrator v2.0")
+    ap.add_argument("--dry-run", action="store_true", help="Simulate without executing")
+    ap.add_argument("--agent", type=str, help="Run specific agent only")
+    ap.add_argument("--no-notify", action="store_true", help="Disable WhatsApp notifications")
+    ap.add_argument("--verbose", action="store_true", help="Verbose logging")
+    
     args = ap.parse_args()
-
+    
+    # Override globals from args
+    global NOTIFY_ENABLED, DRY_RUN
+    if args.no_notify:
+        NOTIFY_ENABLED = False
+    if args.dry_run:
+        DRY_RUN = True
+    
+    log("🦅 BeermannCode Orchestrator v2.0 starting...")
+    log(f"Workspace: {WORKSPACE}")
+    log(f"Config: {AGENTS_CONFIG}")
+    log(f"Notifications: {'enabled' if NOTIFY_ENABLED else 'disabled'}")
+    log(f"Dry-Run: {DRY_RUN}")
+    
+    # Acquire lock
     if not acquire_lock():
-        return 0
-
-    changed_summary: list[str] = []
-    processed = 0
+        return 1
+    
     try:
-        if AUTO_REFILL:
-            seeded = auto_refill_queue(MIN_PENDING_TASKS)
-            if seeded:
-                log(f"[REFILL] added {seeded} new tasks to queue")
-
-        tasks = load_tasks()
-        if args.project:
-            tasks = [t for t in tasks if t.get("repo") == args.project]
-        tasks = enrich_task_defaults(tasks)
-
-        failed_summary: list[str] = []
-        for idx, t in enumerate(tasks, start=1):
-            if idx > MAX_TASKS_PER_RUN:
-                log(f"[LIMIT] reached MAX_TASKS_PER_RUN={MAX_TASKS_PER_RUN}, remaining queued")
-                break
-            task_started = time.time()
-            task_id = t.get("id", "?")
-            repo = t.get("repo", "")
-            spec = t.get("spec", "")
-            task_type = t.get("type", "implement")
-            target_file = t.get("target_file", "")
-            acceptance = t.get("acceptance", "")
-            project = PROJECTS_DIR / repo
-            if not project.exists():
-                mark_done(task_id, "none", status="skipped", reason="project_not_found")
-                continue
-
-            models = choose_ollama_models(task_type)
-            log(f"[TASK] {task_id} {repo} -> {models[0]} (alt: {models[1]}) target={target_file or '-'}")
-            if args.dry_run:
-                mark_done(task_id, models[0])
-                processed += 1
-                continue
-
-            changed_files: list[str] = []
-            used_model = None
-            attempts = 0
-            task_timeout = task_timeout_for_repo(repo)
-            for model in models:
-                if attempts >= MAX_LOCAL_ATTEMPTS:
-                    break
-                if time.time() - task_started > task_timeout:
-                    log(f"[TIMEOUT] task {task_id} exceeded {task_timeout}s")
-                    break
-                attempts += 1
-                result = ollama_generate_edit(model, project, spec, target_file=target_file, acceptance=acceptance)
-                if not result:
-                    continue
-                changed_files = apply_edits(project, result.get("edits", []))
-                if changed_files:
-                    ok, _ = commit_changes(project, task_id, result.get("summary", "implement"))
-                    if ok:
-                        used_model = model
-                        break
-
-            if used_model:
-                mark_done(task_id, used_model)
-                changed_summary.append(f"{repo}: {', '.join(changed_files[:3])}")
-                processed += 1
-                continue
-
-            # fallback to codex only if local attempts produced no changes
-            ok, _ = run_codex_fallback(project, spec)
-            if ok:
-                mark_done(task_id, "codex/gpt-5.2-codex")
-                changed_summary.append(f"{repo}: codex fallback changes")
-                processed += 1
-            else:
-                mark_done(task_id, "none", status="failed", reason="no_changes_after_local_and_fallback")
-                spawned = split_failed_task(t)
-                failed_summary.append(f"{repo} ({task_id})")
-                log(f"[WARN] task {task_id} failed: no changes after local+fallback")
-                if spawned:
-                    log(f"[SPLIT] task {task_id} -> {spawned} subtasks")
-
-        # Notify only when there is something actionable/meaningful
-        if changed_summary:
-            msg = "🦅 BeermannCode Run fertig:\n" + "\n".join(f"• {x}" for x in changed_summary)
-            if failed_summary:
-                msg += "\n⚠️ Ohne Änderungen: " + ", ".join(failed_summary[:5])
-            send_whatsapp(msg)
-        elif failed_summary:
-            msg = "🦅 BeermannCode Run fertig: Keine Änderungen in diesem Run."
-            msg += "\n⚠️ Fehlgeschlagen: " + ", ".join(failed_summary[:5])
-            send_whatsapp(msg)
-        else:
-            log("[NOTIFY] skipped: no changes and no failures")
-
-        # dynamic chain
-        if DYNAMIC_CHAIN:
-            pending_left = len(load_tasks())
-            if pending_left > 0:
-                log(f"[CHAIN] pending={pending_left}, next run in {CHAIN_COOLDOWN_SEC}s")
-                subprocess.Popen([
-                    "bash", "-lc",
-                    f"sleep {CHAIN_COOLDOWN_SEC}; python3 /home/shares/beermann/PROJECTS/BeermannCode/orchestrator.py --tier {args.tier} >/dev/null 2>&1"
-                ])
-
-        log(f"[DONE] processed={processed}")
+        # Run orchestration cycle
+        results = run_orchestration_cycle()
+        
+        # Save state
+        state = load_state()
+        state["last_cycle"] = results
+        save_state(state)
+        
+        # Send summary
+        if NOTIFY_ENABLED:
+            send_cycle_summary(results)
+        
+        log("\n✅ Orchestration cycle completed")
         return 0
+    
+    except Exception as e:
+        log(f"\n💥 Orchestration failed: {e}")
+        import traceback
+        log(traceback.format_exc())
+        return 1
+    
     finally:
         release_lock()
 
