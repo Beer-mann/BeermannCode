@@ -5,7 +5,28 @@
 
 ---
 
-## 📊 Agent-Übersicht (6 Agenten)
+## 📊 Agent-Übersicht (7 Agenten)
+
+### 0️⃣ **Task Creator Agent** (Task Generator)
+- **Rolle:** Systematischer TODO/Issue Generator
+- **Modus:** 24/7 kontinuierlich (alle 30 Min)
+- **Was es kann:**
+  - ✅ Test-Gap Detection (fehlende Tests)
+  - ✅ Doc-Gap Detection (fehlende Docstrings)
+  - ✅ Code-Quality Analysis (Duplication, Magic Numbers, Long Functions)
+  - ✅ Security Scanning (SQL Injection, Hardcoded Secrets)
+  - ✅ Dependency Analysis (Veraltete Packages)
+  - ✅ Performance Analysis (N+1 Queries, etc.)
+  - ✅ Logging Analysis (Missing Logs in Critical Paths)
+  - ✅ Type-Safety Analysis (Any Types, Missing Type-Hints)
+  - ✅ Accessibility Analysis (Missing ARIA, Alt-Text)
+  - ✅ Bug-Risk Detection (Race Conditions, Null Pointers)
+- **Modell:** Claude Code
+- **Output:** WhatsApp stündliche Zusammenfassung
+- **Scope:** Alle 10 Projekte
+- **GitHub Issues:** Ja (für Critical/High)
+
+---
 
 ### 1️⃣ **Architecture Agent** (Orchestrator)
 - **Rolle:** Brain der Operation — überwacht ALLE 10 Projekte
@@ -190,7 +211,8 @@ Architecture Agent (10 min)
 
 ## 📊 Zusammenfassung
 
-**6 spezialisierte Agenten im Einsatz:**
+**7 spezialisierte Agenten im Einsatz:**
+- ✅ 1 Task-Generator (Task Creator)
 - ✅ 1 Orchestrator (Architecture)
 - ✅ 3 Implementation-Agenten (Backend, Frontend, Database)
 - ✅ 1 Proposal-Agent (Feature)

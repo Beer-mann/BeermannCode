@@ -2,14 +2,15 @@
 """
 🦅 BeermannCode Orchestrator v2.0
 
-24/7 Agent Ecosystem Manager
+24/7 Agent Ecosystem Manager (7 Specialized Agents)
+- Task Creator Agent (TODO/Issue Generation)
 - Architecture Agent (Discovery & Prioritization)
 - Backend/Frontend/Database Agents (Parallel Implementation)
 - Feature Agent (Continuous Proposals)
 - Review Agent (Quality Gate)
 
 All agents run as OpenClaw sub-agents.
-Task flow: Architecture → Implementation Agents → Review → Auto-Push → WhatsApp
+Task flow: Task Creator → Architecture → Implementation Agents → Review → Auto-Push → WhatsApp
 """
 
 from __future__ import annotations
@@ -335,6 +336,26 @@ def run_orchestration_cycle() -> dict[str, Any]:
         "tasks_failed": 0,
     }
     
+    # ========== Step 0: Task Creator Agent ==========
+    log("\n📝 Step 0: Task Creator Agent (TODO/Issue Generation)")
+    log("-" * 60)
+    
+    task_creator_config = agents_config["agents"].get("task_creator", {})
+    if task_creator_config:
+        success, output = spawn_agent(
+            "Task Creator Agent",
+            task_creator_config,
+            timeout_sec=600  # 10 min for thorough scanning
+        )
+        results["agents_run"]["task_creator"] = {
+            "success": success,
+            "output": output[:200]
+        }
+        
+        if success:
+            pending_tasks = load_tasks("pending")
+            log(f"[TASK_CREATOR] Generated new TODOs and Issues")
+    
     # ========== Step 1: Architecture Agent ==========
     log("\n📋 Step 1: Architecture Agent (Discovery & Prioritization)")
     log("-" * 60)
@@ -358,7 +379,7 @@ def run_orchestration_cycle() -> dict[str, Any]:
             log(f"[ARCH] Discovered {len(pending_tasks)} pending tasks")
     
     # ========== Step 2: Implementation Agents (Parallel) ==========
-    log("\n🔧 Step 2: Implementation Agents (Parallel)")
+    log("\n🔧 Step 2: Implementation Agents (Parallel: Backend, Frontend, Database)")
     log("-" * 60)
     
     impl_agents = [
@@ -379,7 +400,7 @@ def run_orchestration_cycle() -> dict[str, Any]:
             results["agents_run"][agent_name.lower().replace(" ", "_")] = impl_results[agent_name]
     
     # ========== Step 3: Feature Agent (Continuous) ==========
-    log("\n💡 Step 3: Feature Agent (Continuous Proposals)")
+    log("\n💡 Step 3: Feature Agent (Feature Proposals & Strategic Ideas)")
     log("-" * 60)
     
     feature_config = agents_config["agents"].get("feature", {})
@@ -396,7 +417,7 @@ def run_orchestration_cycle() -> dict[str, Any]:
         }
     
     # ========== Step 4: Review Agent (Reactive) ==========
-    log("\n✅ Step 4: Review Agent (Quality Gate)")
+    log("\n✅ Step 4: Review Agent (Quality Gate & Validation)")
     log("-" * 60)
     
     # Review Agent is triggered when PRs exist

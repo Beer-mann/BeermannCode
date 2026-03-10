@@ -2,6 +2,32 @@
   "version": "2.0",
   "workspace": "/home/shares/beermann",
   "agents": {
+    "task_creator": {
+      "name": "Task Creator Agent",
+      "type": "task_generator",
+      "mode": "continuous_24x7",
+      "scope": "all_projects",
+      "description": "Systematischer TODO/Issue-Generator: Test-Gaps, Doc-Gaps, Code-Quality, Security, Dependencies, Performance, Logging",
+      "projects": "all",
+      "model": "claude-code",
+      "tasks": [
+        "test_gap_detection",
+        "doc_gap_detection",
+        "code_quality_analysis",
+        "security_scanning",
+        "dependency_analysis",
+        "performance_analysis",
+        "logging_analysis",
+        "type_safety_analysis",
+        "accessibility_analysis",
+        "bug_risk_detection"
+      ],
+      "interval_minutes": 30,
+      "notifications": {
+        "whatsapp": "hourly_summary",
+        "channel": "whatsapp"
+      }
+    },
     "architecture": {
       "name": "Architecture Agent",
       "type": "orchestrator",
@@ -166,6 +192,7 @@
   },
   "workflow": {
     "order": [
+      "task_creator",
       "architecture",
       "backend",
       "frontend",
@@ -174,10 +201,22 @@
       "review"
     ],
     "parallelization": {
+      "task_creator": "continuous_30min",
+      "architecture": "parallel_with_all",
       "backend": "parallel_with_frontend_database",
       "frontend": "parallel_with_backend_database",
       "database": "parallel_with_backend_frontend",
-      "feature": "continuous"
+      "feature": "continuous_60min",
+      "review": "reactive"
+    },
+    "dependencies": {
+      "task_creator": "none",
+      "architecture": ["task_creator"],
+      "backend": ["architecture"],
+      "frontend": ["architecture"],
+      "database": ["architecture"],
+      "feature": "independent",
+      "review": ["backend", "frontend", "database"]
     }
   },
   "models": {
