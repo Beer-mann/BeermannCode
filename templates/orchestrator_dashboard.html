@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🦅 BeermannCode Orchestrator Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #0f0c29 0%, #302b63 100%);
+            color: #fff;
+            padding: 20px;
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .timestamp {
+            color: #999;
+            font-size: 0.9em;
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .card {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            transition: all 0.3s ease;
+        }
+        
+        .card:hover {
+            background: rgba(255, 255, 255, 0.12);
+            border-color: rgba(255, 255, 255, 0.2);
+            transform: translateY(-2px);
+        }
+        
+        .card h2 {
+            font-size: 0.9em;
+            color: #999;
+            margin-bottom: 15px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .card-value {
+            font-size: 2em;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        
+        .status-ok {
+            color: #10b981;
+        }
+        
+        .status-warning {
+            color: #f59e0b;
+        }
+        
+        .status-error {
+            color: #ef4444;
+        }
+        
+        .progress-bar {
+            height: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
+        
+        .tasks-section {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .tasks-section h2 {
+            margin-bottom: 15px;
+            font-size: 1.3em;
+        }
+        
+        .task-item {
+            background: rgba(255, 255, 255, 0.05);
+            border-left: 3px solid #667eea;
+            padding: 12px;
+            margin-bottom: 8px;
+            border-radius: 6px;
+            font-size: 0.9em;
+        }
+        
+        .task-item.pending {
+            border-left-color: #f59e0b;
+        }
+        
+        .task-item.completed {
+            border-left-color: #10b981;
+        }
+        
+        .task-item.failed {
+            border-left-color: #ef4444;
+        }
+        
+        .logs-section {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 20px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85em;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .log-line {
+            padding: 4px 0;
+            color: #aaa;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        
+        .log-line.error {
+            color: #ef4444;
+        }
+        
+        .log-line.success {
+            color: #10b981;
+        }
+        
+        .log-line.warning {
+            color: #f59e0b;
+        }
+        
+        .refresh-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            margin-bottom: 20px;
+        }
+        
+        .refresh-btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        
+        .refresh-btn:active {
+            transform: scale(0.95);
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+            animation: pulse 2s infinite;
+        }
+        
+        .status-indicator.active {
+            background: #10b981;
+        }
+        
+        .status-indicator.inactive {
+            background: #ef4444;
+        }
+        
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.5;
+            }
+        }
+        
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        
+        .stat-label {
+            color: #999;
+        }
+        
+        .stat-value {
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🦅 BeermannCode Orchestrator Dashboard</h1>
+            <p class="timestamp">
+                <span class="status-indicator active" id="status-indicator"></span>
+                <span id="current-time"></span>
+            </p>
+        </header>
+        
+        <button class="refresh-btn" onclick="refreshDashboard()">🔄 Refresh</button>
+        
+        <!-- Status Cards -->
+        <div class="grid">
+            <div class="card">
+                <h2>Last Cycle</h2>
+                <div id="last-cycle-time">—</div>
+                <div class="stat-row">
+                    <span class="stat-label">Duration:</span>
+                    <span class="stat-value" id="cycle-duration">—</span>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>Agents Running</h2>
+                <div class="card-value" id="agents-count">—</div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="agents-progress" style="width: 85%"></div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>Success Rate</h2>
+                <div class="card-value status-ok" id="success-rate">—</div>
+                <div class="stat-row">
+                    <span class="stat-label">Total Runs:</span>
+                    <span class="stat-value" id="total-runs">—</span>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>Pending Tasks</h2>
+                <div class="card-value status-warning" id="pending-tasks">—</div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="tasks-progress" style="width: 40%"></div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>Completed</h2>
+                <div class="card-value status-ok" id="completed-tasks">—</div>
+                <div class="stat-row">
+                    <span class="stat-label">Today:</span>
+                    <span class="stat-value" id="today-completed">—</span>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>Failed Tasks</h2>
+                <div class="card-value status-error" id="failed-tasks">—</div>
+                <div class="stat-row">
+                    <span class="stat-label">Status:</span>
+                    <span class="stat-value" id="error-status">✅ None</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Logs Section -->
+        <div class="logs-section">
+            <h2 style="margin-bottom: 15px;">📋 Live Logs</h2>
+            <div id="logs-container"></div>
+        </div>
+    </div>
+    
+    <script>
+        const API_BASE = '/api/orchestrator';
+        
+        // Update time
+        function updateTime() {
+            const now = new Date();
+            document.getElementById('current-time').textContent = 
+                now.toLocaleString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        }
+        
+        // Refresh dashboard
+        async function refreshDashboard() {
+            try {
+                const [statusRes, logsRes, tasksRes] = await Promise.all([
+                    fetch(`${API_BASE}/status`),
+                    fetch(`${API_BASE}/logs?limit=20`),
+                    fetch(`${API_BASE}/tasks`)
+                ]);
+                
+                const status = await statusRes.json();
+                const logs = await logsRes.json();
+                const tasks = await tasksRes.json();
+                
+                updateStatus(status);
+                updateLogs(logs);
+                updateTasks(tasks);
+            } catch (e) {
+                console.error('Error fetching data:', e);
+            }
+        }
+        
+        function updateStatus(status) {
+            const cycle = status.last_cycle || {};
+            
+            document.getElementById('last-cycle-time').textContent = 
+                status.last_run ? new Date(status.last_run).toLocaleTimeString('de-DE') : '—';
+            document.getElementById('cycle-duration').textContent = 
+                cycle.cycle_duration ? cycle.cycle_duration.toFixed(2) + 's' : '—';
+            document.getElementById('agents-count').textContent = 
+                cycle.agents_run ? Object.keys(cycle.agents_run).length : '—';
+            
+            const successCount = cycle.agents_run ? 
+                Object.values(cycle.agents_run).filter(a => a.success).length : 0;
+            const totalAgents = cycle.agents_run ? Object.keys(cycle.agents_run).length : 1;
+            const rate = totalAgents > 0 ? ((successCount / totalAgents) * 100).toFixed(0) : '—';
+            
+            document.getElementById('success-rate').textContent = rate + '%';
+            document.getElementById('total-runs').textContent = totalAgents;
+            
+            const taskStats = status.tasks || {};
+            document.getElementById('pending-tasks').textContent = taskStats.pending || '0';
+            document.getElementById('completed-tasks').textContent = taskStats.completed || '0';
+            document.getElementById('failed-tasks').textContent = taskStats.failed || '0';
+            document.getElementById('error-status').textContent = (taskStats.failed || 0) === 0 ? '✅ None' : '⚠️ ' + taskStats.failed;
+        }
+        
+        function updateLogs(data) {
+            const container = document.getElementById('logs-container');
+            container.innerHTML = '';
+            
+            (data.logs || []).forEach(line => {
+                if (!line.trim()) return;
+                
+                const div = document.createElement('div');
+                div.className = 'log-line';
+                
+                if (line.includes('ERROR') || line.includes('FAILED')) {
+                    div.className += ' error';
+                } else if (line.includes('✅') || line.includes('SUCCESS')) {
+                    div.className += ' success';
+                } else if (line.includes('WARN') || line.includes('⚠️')) {
+                    div.className += ' warning';
+                }
+                
+                div.textContent = line;
+                container.appendChild(div);
+            });
+        }
+        
+        function updateTasks(data) {
+            // Tasks are displayed in status cards
+            document.getElementById('today-completed').textContent = 
+                data.by_status?.completed || 0;
+        }
+        
+        // Initial load and auto-refresh
+        updateTime();
+        refreshDashboard();
+        
+        setInterval(updateTime, 1000);
+        setInterval(refreshDashboard, 5000);  // Refresh every 5 seconds
+    </script>
+</body>
+</html>

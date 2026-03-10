@@ -1,11 +1,20 @@
 import os
 import tempfile
+import json
+from pathlib import Path
+from datetime import datetime
 from flask import Flask, request, jsonify, render_template
 
 from codeai_platform import CodeAIConfig, CodeAnalyzer, CodeReviewer, CodeGenerator
 from codeai_platform.modules.generator import GenerationRequest
 
 app = Flask(__name__)
+
+# Orchestrator paths
+WORKSPACE = Path("/home/shares/beermann")
+LOG_FILE = WORKSPACE / "logs" / "orchestrator-v3.log"
+STATE_FILE = WORKSPACE / "logs" / "orchestrator-state.json"
+TASK_QUEUE = WORKSPACE / "tasks" / "pending.jsonl"
 
 
 LANGUAGE_EXTENSIONS = {
@@ -34,9 +43,106 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/dashboard")
+def dashboard():
+    """BeermannCode Orchestrator Dashboard"""
+    return render_template("orchestrator_dashboard.html")
+
+
 @app.route("/health")
 def health():
     return jsonify({"status": "ok", "service": "BeermannCode"})
+
+
+# ============================================================================
+# ORCHESTRATOR DASHBOARD API
+# ============================================================================
+
+@app.route("/api/orchestrator/status")
+def orchestrator_status():
+    """Get current orchestrator status"""
+    try:
+        state = {}
+        if STATE_FILE.exists():
+            state = json.loads(STATE_FILE.read_text())
+        
+        # Get last log lines
+        logs = []
+        if LOG_FILE.exists():
+            logs = LOG_FILE.read_text().split('\n')[-20:]
+        
+        # Count tasks
+        task_stats = {
+            "pending": 0,
+            "in_progress": 0,
+            "completed": 0,
+            "failed": 0
+        }
+        
+        if TASK_QUEUE.exists():
+            for line in TASK_QUEUE.read_text().split('\n'):
+                if line.strip():
+                    try:
+                        task = json.loads(line)
+                        status = task.get('status', 'unknown')
+                        if status in task_stats:
+                            task_stats[status] += 1
+                    except:
+                        pass
+        
+        return jsonify({
+            "status": "ok",
+            "last_cycle": state.get("last_cycle", {}),
+            "last_run": state.get("last_run"),
+            "logs": logs[-10:],  # Last 10 lines
+            "tasks": task_stats,
+            "timestamp": datetime.now().isoformat()
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/orchestrator/logs")
+def orchestrator_logs():
+    """Get orchestrator logs"""
+    try:
+        limit = request.args.get('limit', 100, type=int)
+        if LOG_FILE.exists():
+            logs = LOG_FILE.read_text().split('\n')[-limit:]
+            return jsonify({"logs": logs})
+        return jsonify({"logs": []})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/orchestrator/tasks")
+def orchestrator_tasks():
+    """Get task queue"""
+    try:
+        tasks = []
+        if TASK_QUEUE.exists():
+            for line in TASK_QUEUE.read_text().split('\n'):
+                if line.strip():
+                    try:
+                        tasks.append(json.loads(line))
+                    except:
+                        pass
+        
+        # Group by status
+        grouped = {}
+        for task in tasks:
+            status = task.get('status', 'unknown')
+            if status not in grouped:
+                grouped[status] = []
+            grouped[status].append(task)
+        
+        return jsonify({
+            "total": len(tasks),
+            "by_status": {k: len(v) for k, v in grouped.items()},
+            "tasks": tasks[-20:]  # Last 20
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/languages")
