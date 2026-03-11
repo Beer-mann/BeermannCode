@@ -233,8 +233,182 @@ def send_whatsapp(msg: str) -> bool:
 
 
 # ============================================================================
+# GITHUB PR MANAGEMENT
+# ============================================================================
+
+def create_github_pr(project_dir: Path, branch: str, title: str, body: str) -> tuple[bool, str]:
+    """
+    Create GitHub PR via gh CLI
+    
+    Returns: (success, pr_url)
+    """
+    if DRY_RUN:
+        log(f"[DRY-RUN] Would create PR for {project_dir.name}/{branch}")
+        return True, f"https://github.com/Beer-mann/{project_dir.name}/pull/123"
+    
+    try:
+        # Ensure branch is pushed
+        push_result = subprocess.run(
+            ["git", "-C", str(project_dir), "push", "-u", "origin", branch],
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        
+        if push_result.returncode != 0:
+            log(f"[ERROR] Failed to push branch {branch}: {push_result.stderr[:200]}")
+            return False, ""
+        
+        # Find main branch
+        main_branch_result = subprocess.run(
+            ["git", "-C", str(project_dir), "symbolic-ref", "refs/remotes/origin/HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        main_branch = "main"
+        if main_branch_result.returncode == 0:
+            main_branch = main_branch_result.stdout.strip().split("/")[-1]
+        
+        # Create PR via gh CLI
+        pr_result = subprocess.run(
+            [
+                "gh", "pr", "create",
+                "--repo", f"Beer-mann/{project_dir.name}",
+                "--base", main_branch,
+                "--head", branch,
+                "--title", title,
+                "--body", body,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=str(project_dir)
+        )
+        
+        if pr_result.returncode == 0:
+            # Extract PR URL from output
+            pr_url = pr_result.stdout.strip().split()[-1]  # URL is typically last
+            log(f"✅ PR created: {pr_url}")
+            
+            # Send WhatsApp notification
+            msg = f"🦅 *BeermannCode PR Created*\n\n📦 *{project_dir.name}*\n🔧 {title}\n\n🔗 {pr_url}"
+            send_whatsapp(msg)
+            
+            return True, pr_url
+        else:
+            log(f"[ERROR] gh pr create failed: {pr_result.stderr[:200]}")
+            return False, ""
+    
+    except Exception as e:
+        log(f"[ERROR] create_github_pr failed: {e}")
+        return False, ""
+
+
+# ============================================================================
 # AGENT SPAWNING
 # ============================================================================
+
+def spawn_project_agent(
+    project_name: str,
+    task_type: str = "improve",
+    branch_name: str | None = None
+) -> tuple[bool, str]:
+    """
+    Spawn sub-agent for a GitHub project via sessions_spawn
+    
+    Args:
+        project_name: Name of project in PROJECTS/
+        task_type: "ui" | "todo" | "tests" | "docs" | "improve"
+        branch_name: Optional branch name (auto-generated if None)
+    
+    Returns: (success, output_summary)
+    """
+    if DRY_RUN:
+        log(f"[DRY-RUN] Would spawn agent for {project_name} ({task_type})")
+        return True, "dry-run"
+    
+    project_dir = PROJECTS_DIR / project_name
+    if not project_dir.exists() or not (project_dir / ".git").exists():
+        log(f"[ERROR] Project {project_name} not found or not a git repo")
+        return False, "project_not_found"
+    
+    # Get repo URL
+    try:
+        url_result = subprocess.run(
+            ["git", "-C", str(project_dir), "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        repo_url = url_result.stdout.strip() if url_result.returncode == 0 else f"github.com/Beer-mann/{project_name}"
+    except:
+        repo_url = f"github.com/Beer-mann/{project_name}"
+    
+    # Generate branch name if not provided
+    if not branch_name:
+        branch_name = f"beermanncode/{task_type}-{int(time.time())}"
+    
+    # Build task prompt based on type
+    task_prompts = {
+        "ui": f"Analyze {repo_url} and create a modern web UI if none exists. Use React or plain HTML/CSS/JS. Create PR when done.",
+        "todo": f"Find and fix all TODO/FIXME comments in {repo_url}. Create PR for fixes.",
+        "tests": f"Add missing tests to {repo_url}. Use pytest/jest as appropriate. Create PR.",
+        "docs": f"Improve documentation for {repo_url}. Add/update README, docstrings, comments. Create PR.",
+        "improve": f"Analyze {repo_url} and make improvements: fix bugs, optimize code, add features. Create PR.",
+    }
+    
+    task_prompt = task_prompts.get(task_type, task_prompts["improve"])
+    task_prompt += f"\n\nAfter creating PR, report back with: 'PR created: [URL]'"
+    
+    # Try agents in order: codex → copilot → claude-code
+    agents = [
+        ("codex", ["codex", task_prompt, "--project", str(project_dir)]),
+        ("copilot", ["copilot", "-p", task_prompt, "--yolo", "--add-dir", str(project_dir)]),
+        ("claude-code", ["claude-code", task_prompt, "--project", str(project_dir)]),
+    ]
+    
+    for agent_name, cmd in agents:
+        try:
+            log(f"[SPAWN] Trying {agent_name} for {project_name}...")
+            
+            spawn_result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=1800,  # 30 min
+                cwd=str(project_dir)
+            )
+            
+            if spawn_result.returncode == 0:
+                log(f"✅ {agent_name} completed for {project_name}")
+                
+                # Check if PR was created (look for "PR created" or GitHub URL in output)
+                output = spawn_result.stdout + spawn_result.stderr
+                if "github.com" in output.lower() and "/pull/" in output.lower():
+                    # Extract PR URL
+                    import re
+                    pr_match = re.search(r'https://github\.com/[^\s]+/pull/\d+', output)
+                    if pr_match:
+                        pr_url = pr_match.group(0)
+                        log(f"🔗 PR detected: {pr_url}")
+                        send_whatsapp(f"🦅 *{project_name}* PR\n\n🔧 {task_type}\n🔗 {pr_url}")
+                
+                return True, output[:500]
+            else:
+                log(f"[WARN] {agent_name} failed: {spawn_result.stderr[:200]}")
+                continue  # Try next agent
+        
+        except FileNotFoundError:
+            log(f"[SKIP] {agent_name} CLI not found")
+            continue
+        except Exception as e:
+            log(f"[ERROR] {agent_name} error: {e}")
+            continue
+    
+    log(f"[ERROR] All agents failed for {project_name}")
+    return False, "all_agents_failed"
+
 
 def spawn_agent(
     agent_name: str,
@@ -242,7 +416,7 @@ def spawn_agent(
     timeout_sec: int = 300
 ) -> tuple[bool, str]:
     """
-    Spawn agent using Aider CLI
+    LEGACY: Spawn agent using Aider CLI (kept for backward compat)
     
     Returns: (success, result_summary)
     """
@@ -398,26 +572,43 @@ def run_orchestration_cycle() -> dict[str, Any]:
             results["tasks_discovered"] = len(pending_tasks)
             log(f"[ARCH] Discovered {len(pending_tasks)} pending tasks")
     
-    # ========== Step 2: Implementation Agents (Parallel) ==========
-    log("\n🔧 Step 2: Implementation Agents (Parallel: Backend, Frontend, Database)")
+    # ========== Step 2: Spawn Agents for All Projects ==========
+    log("\n🔧 Step 2: Spawn Coding Agents for GitHub Projects")
     log("-" * 60)
     
-    impl_agents = [
-        ("Backend Agent", agents_config["agents"].get("backend", {})),
-        ("Frontend Agent", agents_config["agents"].get("frontend", {})),
-        ("Database Agent", agents_config["agents"].get("database", {})),
-    ]
+    # Scan all GitHub projects
+    projects_to_improve = []
+    for project_dir in PROJECTS_DIR.iterdir():
+        if not project_dir.is_dir() or not (project_dir / ".git").exists():
+            continue
+        if project_dir.name == "BeermannCode":
+            continue  # Don't work on self
+        projects_to_improve.append(project_dir.name)
     
+    log(f"Found {len(projects_to_improve)} projects: {', '.join(projects_to_improve)}")
+    
+    # Spawn one agent per project (tasks: ui, todos, tests, docs)
     impl_results = {}
-    for agent_name, agent_config in impl_agents:
-        if agent_config:
-            success, output = spawn_agent(
-                agent_name,
-                agent_config,
-                timeout_sec=AGENT_TIMEOUT_IMPLEMENTATION
-            )
-            impl_results[agent_name] = {"success": success, "output": output[:200]}
-            results["agents_run"][agent_name.lower().replace(" ", "_")] = impl_results[agent_name]
+    for project_name in projects_to_improve:
+        # Determine task type based on project state
+        project_dir = PROJECTS_DIR / project_name
+        
+        # Priority: ui → tests → todos → docs
+        has_ui = any(project_dir.glob("**/index.html")) or any(project_dir.glob("**/App.*"))
+        has_tests = (project_dir / "tests").exists() or (project_dir / "test").exists()
+        
+        if not has_ui:
+            task_type = "ui"
+        elif not has_tests:
+            task_type = "tests"
+        else:
+            task_type = "improve"  # General improvements
+        
+        log(f"[{project_name}] Task: {task_type}")
+        
+        success, output = spawn_project_agent(project_name, task_type)
+        impl_results[project_name] = {"success": success, "output": output[:200], "task_type": task_type}
+        results["agents_run"][project_name] = impl_results[project_name]
     
     # ========== Step 3: Feature Agent (Continuous) ==========
     log("\n💡 Step 3: Feature Agent (Feature Proposals & Strategic Ideas)")
@@ -463,9 +654,72 @@ def run_orchestration_cycle() -> dict[str, Any]:
             log("[REVIEW] No pending reviews")
             results["agents_run"]["review"] = {"success": True, "output": "no_pending"}
     
-    # ========== Step 5: Auto-Commit & Auto-Push ==========
+    # ========== Step 5: GitHub Project Agents (NEW!) ==========
+    log("\n🐙 Step 5: GitHub Project Agents (Spawn for each repo)")
+    log("-" * 60)
+    
+    # Scan all GitHub projects and spawn agents
+    github_projects = []
+    for project_dir in PROJECTS_DIR.iterdir():
+        if not project_dir.is_dir() or not (project_dir / ".git").exists():
+            continue
+        
+        # Check if has GitHub remote
+        try:
+            remote_result = subprocess.run(
+                ["git", "-C", str(project_dir), "remote", "get-url", "origin"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if remote_result.returncode == 0 and "github.com" in remote_result.stdout:
+                github_projects.append(project_dir.name)
+        except:
+            pass
+    
+    log(f"Found {len(github_projects)} GitHub projects: {', '.join(github_projects)}")
+    
+    # Spawn agent for each project (prioritize UI, then TODOs, then improvements)
+    for project_name in github_projects:
+        project_dir = PROJECTS_DIR / project_name
+        
+        # Determine what work is needed
+        needs_ui = not any((project_dir / d).exists() for d in ["frontend", "ui", "public"])
+        has_todos = False
+        
+        try:
+            # Quick TODO check
+            result = subprocess.run(
+                ["grep", "-r", "TODO\\|FIXME", str(project_dir), "--include=*.py", "--include=*.js"],
+                capture_output=True,
+                timeout=10
+            )
+            has_todos = result.returncode == 0
+        except:
+            pass
+        
+        # Decide task type
+        if needs_ui:
+            task_type = "ui"
+        elif has_todos:
+            task_type = "todo"
+        else:
+            task_type = "improve"
+        
+        log(f"Spawning {task_type} agent for {project_name}...")
+        success, output = spawn_project_agent(project_name, task_type)
+        
+        results["agents_run"][f"github_{project_name}_{task_type}"] = {
+            "success": success,
+            "output": output[:200]
+        }
+        
+        # Rate limit between spawns
+        time.sleep(5)
+    
+    # ========== Step 6: Auto-Commit & Auto-Push ==========
     if AUTO_COMMIT or AUTO_PUSH:
-        log("\n📤 Step 5: Auto-Commit & Auto-Push")
+        log("\n📤 Step 6: Auto-Commit & Auto-Push")
         log("-" * 60)
         
         # Scan all projects for uncommitted changes
