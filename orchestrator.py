@@ -242,7 +242,7 @@ def spawn_agent(
     timeout_sec: int = 300
 ) -> tuple[bool, str]:
     """
-    Spawn agent as OpenClaw sub-agent
+    Spawn agent using Aider CLI
     
     Returns: (success, result_summary)
     """
@@ -253,42 +253,60 @@ def spawn_agent(
     start_time = time.time()
     
     try:
-        # Build agent task description
-        agent_type = agent_config.get("type", "unknown")
+        # Get agent domain and tasks
         agent_domain = agent_config.get("domain", "all")
-        agent_mode = agent_config.get("mode", "continuous_loop")
+        agent_desc = agent_config.get("description", "")
         
-        task_desc = f"""
-Run {agent_name} agent:
-- Type: {agent_type}
-- Domain: {agent_domain}
-- Mode: {agent_mode}
-
-Config: {json.dumps(agent_config, indent=2)}
-
-Load tasks from: {TASK_QUEUE}
-Update task status based on completion.
-Send WhatsApp updates per agent config.
-"""
+        # Find project to work on based on domain
+        target_project = None
+        for project in PROJECTS_DIR.iterdir():
+            if not project.is_dir() or not (project / ".git").exists():
+                continue
+            
+            # Check if project has work for this agent
+            if agent_domain == "backend" and any(p.suffix == ".py" for p in project.rglob("*.py")):
+                target_project = project
+                break
+            elif agent_domain == "frontend" and any(p.suffix in [".js", ".jsx", ".tsx"] for p in project.rglob("*")):
+                target_project = project
+                break
+            elif agent_domain == "all":
+                target_project = project
+                break
         
-        # Spawn as OpenClaw sub-agent
+        if not target_project:
+            log(f"[SKIP] {agent_name}: No suitable project found for domain {agent_domain}")
+            return True, "no_work"
+        
+        # Build Aider task from agent config
+        task_message = agent_desc or f"Analyze and improve code in this project. {agent_name} focus."
+        
+        # Run Aider
+        env = os.environ.copy()
+        env["OLLAMA_API_BASE"] = "http://192.168.0.213:11434"
+        
         result = subprocess.run(
             [
-                "sessions_spawn",
-                "--mode", "run",
-                "--runtime", "subagent",
-                "--task", task_desc,
+                "aider",
+                "--model", "ollama/qwen2.5-coder:7b",
+                "--env-file", "/home/beermann/.aider.env",
+                "--yes-always",
+                "--auto-commits",
+                "--no-show-model-warnings",
+                "--message", task_message
             ],
+            cwd=str(target_project),
             capture_output=True,
             text=True,
+            env=env,
             timeout=timeout_sec
         )
         
         duration = time.time() - start_time
         
         if result.returncode == 0:
-            log_agent_run(agent_name, "✅ SUCCESS", duration, "completed")
-            return True, result.stdout[:200]
+            log_agent_run(agent_name, "✅ SUCCESS", duration, f"worked on {target_project.name}")
+            return True, result.stdout[-200:]
         else:
             log_agent_run(agent_name, "❌ FAILED", duration, result.stderr[:100])
             return False, result.stderr[:200]
