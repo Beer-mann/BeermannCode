@@ -46,6 +46,8 @@ LOCK_FILE = Path("/tmp/beermanncode-orchestrator.lock")
 WHATSAPP_TO = os.getenv("WHATSAPP_TO", "+4917643995085")
 NOTIFY_ENABLED = os.getenv("NOTIFY_ENABLED", "true").lower() == "true"
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
+AUTO_PUSH = os.getenv("AUTO_PUSH", "true").lower() == "true"  # Auto-push to GitHub
+AUTO_COMMIT = os.getenv("AUTO_COMMIT", "true").lower() == "true"  # Auto-commit changes
 
 # Agent timeouts (seconds)
 AGENT_TIMEOUT_ARCHITECTURE = int(os.getenv("AGENT_TIMEOUT_ARCHITECTURE", "600"))  # 10 min
@@ -442,6 +444,69 @@ def run_orchestration_cycle() -> dict[str, Any]:
         else:
             log("[REVIEW] No pending reviews")
             results["agents_run"]["review"] = {"success": True, "output": "no_pending"}
+    
+    # ========== Step 5: Auto-Commit & Auto-Push ==========
+    if AUTO_COMMIT or AUTO_PUSH:
+        log("\n📤 Step 5: Auto-Commit & Auto-Push")
+        log("-" * 60)
+        
+        # Scan all projects for uncommitted changes
+        projects_with_changes = []
+        
+        for project_dir in PROJECTS_DIR.iterdir():
+            if not project_dir.is_dir() or not (project_dir / ".git").exists():
+                continue
+            
+            try:
+                # Check if there are uncommitted changes
+                result = subprocess.run(
+                    ["git", "-C", str(project_dir), "status", "--porcelain"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                
+                if result.stdout.strip():
+                    projects_with_changes.append(project_dir.name)
+                    
+                    if DRY_RUN:
+                        log(f"[DRY-RUN] Would commit & push {project_dir.name}")
+                        continue
+                    
+                    # Auto-commit
+                    if AUTO_COMMIT:
+                        subprocess.run(
+                            ["git", "-C", str(project_dir), "add", "-A"],
+                            timeout=10
+                        )
+                        subprocess.run(
+                            ["git", "-C", str(project_dir), "commit", "-m", 
+                             f"🤖 Auto-commit by BeermannCode Orchestrator @ {datetime.now().strftime('%Y-%m-%d %H:%M')}"],
+                            timeout=10
+                        )
+                        log(f"✅ Auto-committed: {project_dir.name}")
+                    
+                    # Auto-push
+                    if AUTO_PUSH:
+                        push_result = subprocess.run(
+                            ["git", "-C", str(project_dir), "push"],
+                            capture_output=True,
+                            text=True,
+                            timeout=30
+                        )
+                        
+                        if push_result.returncode == 0:
+                            log(f"📤 Auto-pushed: {project_dir.name}")
+                        else:
+                            log(f"⚠️  Push failed for {project_dir.name}: {push_result.stderr[:100]}")
+            
+            except Exception as e:
+                log(f"❌ Error processing {project_dir.name}: {str(e)[:100]}")
+        
+        if projects_with_changes:
+            log(f"📋 Projects with changes: {', '.join(projects_with_changes)}")
+        else:
+            log("✨ No uncommitted changes across projects")
     
     # ========== SUMMARY ==========
     cycle_duration = time.time() - cycle_start
