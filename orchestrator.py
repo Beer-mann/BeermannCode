@@ -361,11 +361,11 @@ def spawn_project_agent(
     task_prompt = task_prompts.get(task_type, task_prompts["improve"])
     task_prompt += f"\n\nAfter creating PR, report back with: 'PR created: [URL]'"
     
-    # Try agents in order: codex → copilot → claude-code
+    # Try agents in order: codex → copilot
+    # Note: claude-code uses OAuth, not API key
     agents = [
-        ("codex", ["codex", task_prompt, "--project", str(project_dir)]),
+        ("codex", ["codex", "exec", "--yolo", task_prompt]),
         ("copilot", ["copilot", "-p", task_prompt, "--yolo", "--add-dir", str(project_dir)]),
-        ("claude-code", ["claude-code", task_prompt, "--project", str(project_dir)]),
     ]
     
     for agent_name, cmd in agents:
