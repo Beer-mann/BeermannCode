@@ -594,8 +594,16 @@ def run_orchestration_cycle() -> dict[str, Any]:
         # Determine task type based on project state
         project_dir = PROJECTS_DIR / project_name
         
-        # Priority: ui → tests → todos → docs
-        has_ui = any(project_dir.glob("**/index.html")) or any(project_dir.glob("**/App.*"))
+        # Priority: ui → tests → improve
+        # Check for UI in common locations
+        has_ui = False
+        ui_patterns = ["**/index.html", "**/templates/*.html", "**/static/*.html", "**/public/*.html", 
+                      "**/frontend/**/*.html", "**/ui/**/*.html", "**/*.jsx", "**/*.vue"]
+        for pattern in ui_patterns:
+            if any(project_dir.glob(pattern)):
+                has_ui = True
+                break
+        
         has_tests = (project_dir / "tests").exists() or (project_dir / "test").exists()
         
         if not has_ui:
