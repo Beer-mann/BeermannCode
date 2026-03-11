@@ -120,18 +120,20 @@ def orchestrator_tasks():
     """Get task queue"""
     try:
         tasks = []
-        if TASK_QUEUE.exists():
-            for line in TASK_QUEUE.read_text().split('\n'):
-                if line.strip():
-                    try:
-                        tasks.append(json.loads(line))
-                    except:
-                        pass
+        # Check both old and new task files
+        for task_file in [TASK_QUEUE, WORKSPACE / "tasks" / "done.jsonl"]:
+            if task_file.exists():
+                for line in task_file.read_text().split('\n'):
+                    if line.strip():
+                        try:
+                            tasks.append(json.loads(line))
+                        except:
+                            pass
         
         # Group by status
         grouped = {}
         for task in tasks:
-            status = task.get('status', 'unknown')
+            status = task.get('status', 'completed')
             if status not in grouped:
                 grouped[status] = []
             grouped[status].append(task)
@@ -139,10 +141,28 @@ def orchestrator_tasks():
         return jsonify({
             "total": len(tasks),
             "by_status": {k: len(v) for k, v in grouped.items()},
-            "tasks": tasks[-20:]  # Last 20
+            "tasks": tasks[-30:]  # Last 30
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/orchestrator/ollama")
+def orchestrator_ollama():
+    """Check Ollama status"""
+    try:
+        import requests
+        resp = requests.get("http://192.168.0.213:11434/api/tags", timeout=3)
+        if resp.status_code == 200:
+            models = resp.json().get('models', [])
+            return jsonify({
+                "status": "online",
+                "models_count": len(models),
+                "host": "192.168.0.213:11434"
+            })
+        return jsonify({"status": "error", "message": "Unexpected response"}), 500
+    except Exception as e:
+        return jsonify({"status": "offline", "error": str(e)}), 503
 
 
 @app.route("/languages")

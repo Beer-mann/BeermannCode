@@ -239,7 +239,12 @@
 <body>
     <div class="container">
         <header>
-            <h1>🦅 BeermannCode Orchestrator Dashboard</h1>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <h1>🦅 BeermannCode Orchestrator Dashboard</h1>
+                <a href="/" style="color: #667eea; text-decoration: none; font-weight: bold;">
+                    ← Back to Code Assistant
+                </a>
+            </div>
             <p class="timestamp">
                 <span class="status-indicator active" id="status-indicator"></span>
                 <span id="current-time"></span>
@@ -303,6 +308,52 @@
             </div>
         </div>
         
+        <!-- Recent Tasks Section -->
+        <div class="tasks-section">
+            <h2>📝 Recent Tasks</h2>
+            <div id="tasks-container">
+                <div style="color: #999; text-align: center; padding: 20px;">
+                    No tasks yet...
+                </div>
+            </div>
+        </div>
+        
+        <!-- System Info -->
+        <div class="grid" style="margin-bottom: 30px;">
+            <div class="card">
+                <h2>Aider Version</h2>
+                <div class="stat-row">
+                    <span class="stat-label">Version:</span>
+                    <span class="stat-value">0.86.2</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Model:</span>
+                    <span class="stat-value">qwen2.5-coder:7b</span>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>Ollama Status</h2>
+                <div class="stat-row">
+                    <span class="stat-label">Host:</span>
+                    <span class="stat-value">192.168.0.213:11434</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Status:</span>
+                    <span class="stat-value status-ok" id="ollama-status">🟢 Online</span>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>Cost Savings</h2>
+                <div class="card-value status-ok">100%</div>
+                <div class="stat-row">
+                    <span class="stat-label">Using:</span>
+                    <span class="stat-value">Local Ollama (Free!)</span>
+                </div>
+            </div>
+        </div>
+        
         <!-- Logs Section -->
         <div class="logs-section">
             <h2 style="margin-bottom: 15px;">📋 Live Logs</h2>
@@ -323,21 +374,35 @@
         // Refresh dashboard
         async function refreshDashboard() {
             try {
-                const [statusRes, logsRes, tasksRes] = await Promise.all([
+                const [statusRes, logsRes, tasksRes, ollamaRes] = await Promise.all([
                     fetch(`${API_BASE}/status`),
                     fetch(`${API_BASE}/logs?limit=20`),
-                    fetch(`${API_BASE}/tasks`)
+                    fetch(`${API_BASE}/tasks`),
+                    fetch(`${API_BASE}/ollama`)
                 ]);
                 
                 const status = await statusRes.json();
                 const logs = await logsRes.json();
                 const tasks = await tasksRes.json();
+                const ollama = await ollamaRes.json();
                 
                 updateStatus(status);
                 updateLogs(logs);
                 updateTasks(tasks);
+                updateOllama(ollama);
             } catch (e) {
                 console.error('Error fetching data:', e);
+            }
+        }
+        
+        function updateOllama(data) {
+            const statusEl = document.getElementById('ollama-status');
+            if (data.status === 'online') {
+                statusEl.innerHTML = `🟢 Online (${data.models_count || 0} models)`;
+                statusEl.className = 'stat-value status-ok';
+            } else {
+                statusEl.innerHTML = '🔴 Offline';
+                statusEl.className = 'stat-value status-error';
             }
         }
         
@@ -390,9 +455,46 @@
         }
         
         function updateTasks(data) {
-            // Tasks are displayed in status cards
+            // Update status cards
             document.getElementById('today-completed').textContent = 
                 data.by_status?.completed || 0;
+            
+            // Update tasks list
+            const container = document.getElementById('tasks-container');
+            const tasks = data.tasks || [];
+            
+            if (tasks.length === 0) {
+                container.innerHTML = '<div style="color: #999; text-align: center; padding: 20px;">No recent tasks...</div>';
+                return;
+            }
+            
+            container.innerHTML = '';
+            tasks.slice(-10).reverse().forEach(task => {
+                const div = document.createElement('div');
+                div.className = 'task-item ' + (task.status || 'pending');
+                
+                const statusEmoji = {
+                    'completed': '✅',
+                    'pending': '⏳',
+                    'failed': '❌',
+                    'in_progress': '🔄'
+                }[task.status || 'pending'] || '📝';
+                
+                const timestamp = task.timestamp || task.ts || '';
+                const timeStr = timestamp ? new Date(timestamp).toLocaleTimeString('de-DE') : '';
+                
+                div.innerHTML = `
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                        <strong>${statusEmoji} ${task.project || 'Unknown'}</strong>
+                        <span style="color: #999; font-size: 0.85em;">${timeStr}</span>
+                    </div>
+                    <div style="color: #ccc; font-size: 0.85em;">
+                        ${task.type || 'task'} → ${task.file || task.detail || 'no details'}
+                    </div>
+                `;
+                
+                container.appendChild(div);
+            });
         }
         
         // Initial load and auto-refresh
