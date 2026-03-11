@@ -318,17 +318,51 @@
             </div>
         </div>
         
+        <!-- CLI Agents Status -->
+        <div class="tasks-section" style="margin-bottom: 30px;">
+            <h2>🤖 CLI Agents</h2>
+            <div id="agents-container">
+                <div style="color: #999; text-align: center; padding: 20px;">
+                    Loading...
+                </div>
+            </div>
+        </div>
+        
         <!-- System Info -->
         <div class="grid" style="margin-bottom: 30px;">
             <div class="card">
-                <h2>Aider Version</h2>
+                <h2>Aider</h2>
                 <div class="stat-row">
-                    <span class="stat-label">Version:</span>
-                    <span class="stat-value">0.86.2</span>
+                    <span class="stat-label">Status:</span>
+                    <span class="stat-value" id="aider-status">—</span>
                 </div>
                 <div class="stat-row">
-                    <span class="stat-label">Model:</span>
-                    <span class="stat-value">qwen2.5-coder:7b</span>
+                    <span class="stat-label">Version:</span>
+                    <span class="stat-value" id="aider-version">—</span>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>Codex CLI</h2>
+                <div class="stat-row">
+                    <span class="stat-label">Status:</span>
+                    <span class="stat-value" id="codex-status">—</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Version:</span>
+                    <span class="stat-value" id="codex-version">—</span>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>Claude CLI</h2>
+                <div class="stat-row">
+                    <span class="stat-label">Status:</span>
+                    <span class="stat-value" id="claude-status">—</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Version:</span>
+                    <span class="stat-value" id="claude-version">—</span>
                 </div>
             </div>
             
@@ -350,6 +384,18 @@
                 <div class="stat-row">
                     <span class="stat-label">Using:</span>
                     <span class="stat-value">Local Ollama (Free!)</span>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>GitHub Copilot</h2>
+                <div class="stat-row">
+                    <span class="stat-label">Status:</span>
+                    <span class="stat-value" id="gh-status">—</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Version:</span>
+                    <span class="stat-value" id="gh-version">—</span>
                 </div>
             </div>
         </div>
@@ -374,22 +420,25 @@
         // Refresh dashboard
         async function refreshDashboard() {
             try {
-                const [statusRes, logsRes, tasksRes, ollamaRes] = await Promise.all([
+                const [statusRes, logsRes, tasksRes, ollamaRes, agentsRes] = await Promise.all([
                     fetch(`${API_BASE}/status`),
                     fetch(`${API_BASE}/logs?limit=20`),
                     fetch(`${API_BASE}/tasks`),
-                    fetch(`${API_BASE}/ollama`)
+                    fetch(`${API_BASE}/ollama`),
+                    fetch(`${API_BASE}/agents`)
                 ]);
                 
                 const status = await statusRes.json();
                 const logs = await logsRes.json();
                 const tasks = await tasksRes.json();
                 const ollama = await ollamaRes.json();
+                const agents = await agentsRes.json();
                 
                 updateStatus(status);
                 updateLogs(logs);
                 updateTasks(tasks);
                 updateOllama(ollama);
+                updateAgents(agents);
             } catch (e) {
                 console.error('Error fetching data:', e);
             }
@@ -404,6 +453,64 @@
                 statusEl.innerHTML = '🔴 Offline';
                 statusEl.className = 'stat-value status-error';
             }
+        }
+        
+        function updateAgents(data) {
+            const agents = data.agents || {};
+            
+            // Aider
+            const aider = agents.aider || {};
+            document.getElementById('aider-status').innerHTML = 
+                aider.status === 'installed' ? '✅ Installed' : '❌ Not Found';
+            document.getElementById('aider-status').className = 
+                'stat-value ' + (aider.status === 'installed' ? 'status-ok' : 'status-error');
+            document.getElementById('aider-version').textContent = aider.version || '—';
+            
+            // Codex
+            const codex = agents.codex || {};
+            document.getElementById('codex-status').innerHTML = 
+                codex.status === 'installed' ? '✅ Installed' : '❌ Not Found';
+            document.getElementById('codex-status').className = 
+                'stat-value ' + (codex.status === 'installed' ? 'status-ok' : 'status-error');
+            document.getElementById('codex-version').textContent = codex.version || '—';
+            
+            // Claude
+            const claude = agents.claude || {};
+            document.getElementById('claude-status').innerHTML = 
+                claude.status === 'installed' ? '✅ Installed' : '❌ Not Found';
+            document.getElementById('claude-status').className = 
+                'stat-value ' + (claude.status === 'installed' ? 'status-ok' : 'status-error');
+            document.getElementById('claude-version').textContent = claude.version || '—';
+            
+            // GitHub Copilot
+            const gh = agents.github_copilot || {};
+            document.getElementById('gh-status').innerHTML = 
+                gh.status === 'installed' ? '✅ Installed' : 
+                gh.status === 'extension_missing' ? '⚠️ Extension Missing' : '❌ Not Found';
+            document.getElementById('gh-status').className = 
+                'stat-value ' + (gh.status === 'installed' ? 'status-ok' : 
+                gh.status === 'extension_missing' ? 'status-warning' : 'status-error');
+            document.getElementById('gh-version').textContent = gh.version || '—';
+            
+            // Agents container (summary)
+            const container = document.getElementById('agents-container');
+            const agentList = Object.keys(agents);
+            const installed = agentList.filter(k => agents[k].status === 'installed').length;
+            
+            container.innerHTML = `
+                <div class="stat-row">
+                    <span class="stat-label">Total Agents:</span>
+                    <span class="stat-value">${agentList.length}</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Installed:</span>
+                    <span class="stat-value status-ok">${installed}</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Missing:</span>
+                    <span class="stat-value status-error">${agentList.length - installed}</span>
+                </div>
+            `;
         }
         
         function updateStatus(status) {

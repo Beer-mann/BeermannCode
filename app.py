@@ -165,6 +165,65 @@ def orchestrator_ollama():
         return jsonify({"status": "offline", "error": str(e)}), 503
 
 
+@app.route("/api/orchestrator/agents")
+def orchestrator_agents():
+    """Get CLI agent status (Aider, Codex, Claude, GitHub Copilot)"""
+    import subprocess
+    import shutil
+    
+    agents = {}
+    
+    # Aider
+    aider_path = shutil.which("aider")
+    if aider_path:
+        try:
+            version = subprocess.check_output(["aider", "--version"], stderr=subprocess.STDOUT, timeout=3, text=True).strip()
+            agents["aider"] = {"status": "installed", "version": version, "path": aider_path}
+        except:
+            agents["aider"] = {"status": "installed", "version": "unknown", "path": aider_path}
+    else:
+        agents["aider"] = {"status": "not_installed"}
+    
+    # Codex CLI
+    codex_path = shutil.which("codex")
+    if codex_path:
+        try:
+            version = subprocess.check_output(["codex", "--version"], timeout=3, text=True).strip()
+            agents["codex"] = {"status": "installed", "version": version, "path": codex_path}
+        except:
+            agents["codex"] = {"status": "installed", "version": "unknown", "path": codex_path}
+    else:
+        agents["codex"] = {"status": "not_installed"}
+    
+    # Claude CLI
+    claude_path = shutil.which("claude")
+    if claude_path:
+        try:
+            version = subprocess.check_output(["claude", "--version"], timeout=3, text=True).strip()
+            agents["claude"] = {"status": "installed", "version": version, "path": claude_path}
+        except:
+            agents["claude"] = {"status": "installed", "version": "unknown", "path": claude_path}
+    else:
+        agents["claude"] = {"status": "not_installed"}
+    
+    # GitHub Copilot CLI
+    gh_path = shutil.which("gh")
+    if gh_path:
+        try:
+            # Check if copilot extension is installed
+            result = subprocess.run(["gh", "extension", "list"], capture_output=True, text=True, timeout=3)
+            if "copilot" in result.stdout.lower():
+                agents["github_copilot"] = {"status": "installed", "version": "gh extension", "path": gh_path}
+            else:
+                agents["github_copilot"] = {"status": "extension_missing"}
+        except:
+            agents["github_copilot"] = {"status": "unknown"}
+    else:
+        agents["github_copilot"] = {"status": "not_installed"}
+    
+    return jsonify({"agents": agents, "total": len([a for a in agents.values() if a.get("status") == "installed"])})
+
+
 @app.route("/languages")
 def languages():
     return jsonify({"languages": list(LANGUAGE_EXTENSIONS.keys())})
