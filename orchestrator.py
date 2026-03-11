@@ -361,9 +361,10 @@ def spawn_project_agent(
     task_prompt = task_prompts.get(task_type, task_prompts["improve"])
     task_prompt += f"\n\nAfter creating PR, report back with: 'PR created: [URL]'"
     
-    # Try agents in order: codex → copilot
-    # Note: claude-code uses OAuth, not API key
+    # Try agents in order: claude → codex → copilot
+    # All use their direct CLI (no OpenClaw, no API keys)
     agents = [
+        ("claude", ["claude", "-p", task_prompt, "--dangerously-skip-permissions"]),
         ("codex", ["codex", "exec", "--yolo", task_prompt]),
         ("copilot", ["copilot", "-p", task_prompt, "--yolo", "--add-dir", str(project_dir)]),
     ]
