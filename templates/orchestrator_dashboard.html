@@ -1,151 +1,208 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="de">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BeermannCode Dashboard</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>🦅 BeermannCode Orchestrator v4</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0d1117;color:#c9d1d9;min-height:100vh}
+.header{background:#161b22;border-bottom:1px solid #30363d;padding:16px 24px;display:flex;align-items:center;gap:16px}
+.header h1{font-size:1.4em;color:#f0f6fc}
+.header .version{background:#238636;color:#fff;padding:2px 8px;border-radius:12px;font-size:.75em}
+.container{max-width:1400px;margin:0 auto;padding:20px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:20px}
+.card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px}
+.card h3{color:#58a6ff;font-size:.9em;margin-bottom:12px;text-transform:uppercase;letter-spacing:.5px}
+.stat{font-size:2em;font-weight:700;color:#f0f6fc}
+.stat-label{font-size:.8em;color:#8b949e;margin-top:4px}
+.cli-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px}
+.cli-item{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#0d1117;border-radius:6px;font-size:.85em}
+.dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.dot.on{background:#3fb950}
+.dot.off{background:#f85149}
+.project-list{list-style:none}
+.project-item{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #21262d}
+.project-item:last-child{border-bottom:none}
+.project-name{font-weight:600;color:#f0f6fc}
+.project-name.priority{color:#d29922}
+.badge{padding:2px 8px;border-radius:10px;font-size:.75em;font-weight:600}
+.badge-todo{background:#1f2937;color:#f97316}
+.badge-quality{background:#1f2937;color:#a855f7}
+.badge-docs{background:#1f2937;color:#06b6d4}
+.badge-count{background:#30363d;color:#c9d1d9}
+.log-area{background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:12px;max-height:300px;overflow-y:auto;font-family:'JetBrains Mono',monospace;font-size:.78em;line-height:1.6}
+.log-line{white-space:pre-wrap;word-break:break-all}
+.log-line .ts{color:#8b949e}
+.log-line .ok{color:#3fb950}
+.log-line .fail{color:#f85149}
+.log-line .info{color:#58a6ff}
+table{width:100%;border-collapse:collapse;font-size:.85em}
+th{text-align:left;padding:8px;color:#8b949e;border-bottom:1px solid #30363d;font-weight:600}
+td{padding:8px;border-bottom:1px solid #21262d}
+.status-ok{color:#3fb950}
+.status-fail{color:#f85149}
+.refresh-btn{background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:6px 16px;border-radius:6px;cursor:pointer;font-size:.85em}
+.refresh-btn:hover{background:#30363d}
+.fallback-chain{display:flex;gap:4px;align-items:center;flex-wrap:wrap}
+.fallback-chain .arrow{color:#484f58}
+.fallback-chain .cli-tag{padding:2px 8px;border-radius:4px;font-size:.8em;font-weight:600}
+.cli-tag.active{background:#238636;color:#fff}
+.cli-tag.inactive{background:#21262d;color:#484f58;text-decoration:line-through}
+</style>
 </head>
-<body data-page="dashboard">
-  <div class="page-shell page-shell--dashboard">
-    <header class="dashboard-hero glass-card">
-      <div>
-        <p class="eyebrow">Operational Visibility</p>
-        <h1>Orchestrator dashboard</h1>
-        <p class="hero__lede">Live status for runs, queue pressure, CLI agent availability, and recent logs.</p>
-      </div>
-      <div class="dashboard-hero__actions">
-        <div class="status-chip">
-          <span class="status-chip__dot" id="status-indicator"></span>
-          <span id="current-time">--:--:--</span>
-        </div>
-        <div class="hero__actions">
-          <button id="refreshBtn" class="button button--primary" type="button">Refresh</button>
-          <a class="button button--ghost" href="/">Back to studio</a>
-        </div>
-      </div>
-    </header>
+<body>
+<div class="header">
+  <h1>🦅 BeermannCode Orchestrator</h1>
+  <span class="version">v4.0</span>
+  <div style="flex:1"></div>
+  <button class="refresh-btn" onclick="refresh()">🔄 Refresh</button>
+  <span id="lastUpdate" style="font-size:.8em;color:#8b949e"></span>
+</div>
 
-    <main class="dashboard-layout">
-      <section class="stats-grid">
-        <article class="glass-card stat-card">
-          <p class="section-label">Last cycle</p>
-          <h2 id="last-cycle-time">--</h2>
-          <p class="meta-line">Duration <span id="cycle-duration">--</span></p>
-        </article>
-        <article class="glass-card stat-card">
-          <p class="section-label">Agents running</p>
-          <h2 id="agents-count">--</h2>
-          <div class="progress-track"><div id="agents-progress" class="progress-fill" style="width:0%"></div></div>
-        </article>
-        <article class="glass-card stat-card">
-          <p class="section-label">Success rate</p>
-          <h2 id="success-rate">--</h2>
-          <p class="meta-line">Total runs <span id="total-runs">--</span></p>
-        </article>
-        <article class="glass-card stat-card">
-          <p class="section-label">Pending tasks</p>
-          <h2 id="pending-tasks">0</h2>
-          <div class="progress-track"><div id="tasks-progress" class="progress-fill" style="width:0%"></div></div>
-        </article>
-        <article class="glass-card stat-card">
-          <p class="section-label">Completed</p>
-          <h2 id="completed-tasks">0</h2>
-          <p class="meta-line">Visible completed <span id="today-completed">0</span></p>
-        </article>
-        <article class="glass-card stat-card">
-          <p class="section-label">Failed tasks</p>
-          <h2 id="failed-tasks">0</h2>
-          <p class="meta-line" id="error-status">None</p>
-        </article>
-      </section>
-
-      <section class="dashboard-columns">
-        <div class="dashboard-column">
-          <article class="glass-card">
-            <div class="panel-heading panel-heading--tight">
-              <div>
-                <p class="section-label">Recent work</p>
-                <h3>Task queue</h3>
-              </div>
-            </div>
-            <div id="tasks-container" class="list-stack list-stack--spacious">
-              <div class="empty-message">No recent tasks.</div>
-            </div>
-          </article>
-
-          <article class="glass-card">
-            <div class="panel-heading panel-heading--tight">
-              <div>
-                <p class="section-label">Live logs</p>
-                <h3>Execution feed</h3>
-              </div>
-            </div>
-            <div id="logs-container" class="logs-container"></div>
-          </article>
-        </div>
-
-        <div class="dashboard-column">
-          <article class="glass-card">
-            <div class="panel-heading panel-heading--tight">
-              <div>
-                <p class="section-label">CLI agents</p>
-                <h3>Environment availability</h3>
-              </div>
-            </div>
-            <div id="agents-container" class="list-stack">
-              <div class="empty-message">Loading agent data...</div>
-            </div>
-          </article>
-
-          <article class="glass-card">
-            <div class="panel-heading panel-heading--tight">
-              <div>
-                <p class="section-label">Runtime services</p>
-                <h3>Dependencies</h3>
-              </div>
-            </div>
-            <div class="service-grid">
-              <div class="service-card">
-                <span>Ollama</span>
-                <strong id="ollama-status">Checking...</strong>
-                <small>192.168.0.213:11434</small>
-              </div>
-              <div class="service-card">
-                <span>Aider</span>
-                <strong id="aider-status">--</strong>
-                <small id="aider-version">--</small>
-              </div>
-              <div class="service-card">
-                <span>Codex CLI</span>
-                <strong id="codex-status">--</strong>
-                <small id="codex-version">--</small>
-              </div>
-              <div class="service-card">
-                <span>Claude CLI</span>
-                <strong id="claude-status">--</strong>
-                <small id="claude-version">--</small>
-              </div>
-              <div class="service-card">
-                <span>GitHub Copilot</span>
-                <strong id="gh-status">--</strong>
-                <small id="gh-version">--</small>
-              </div>
-              <div class="service-card">
-                <span>Cost savings</span>
-                <strong>100%</strong>
-                <small>Local Ollama routing</small>
-              </div>
-            </div>
-          </article>
-        </div>
-      </section>
-    </main>
+<div class="container">
+  <!-- CLI Status -->
+  <div class="grid">
+    <div class="card">
+      <h3>🤖 CLI Agents</h3>
+      <div class="cli-grid" id="cliGrid"></div>
+    </div>
+    <div class="card">
+      <h3>⛓️ Fallback Chain</h3>
+      <div class="fallback-chain" id="fallbackChain"></div>
+      <div style="margin-top:12px;font-size:.8em;color:#8b949e">Erster verfügbarer CLI wird verwendet</div>
+    </div>
+    <div class="card">
+      <h3>⚙️ Config</h3>
+      <div id="configInfo" style="font-size:.85em;line-height:1.8"></div>
+    </div>
   </div>
 
-  <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+  <!-- Projects -->
+  <div class="grid" style="grid-template-columns:1fr 1fr">
+    <div class="card">
+      <h3>📂 Projekte & Tasks</h3>
+      <ul class="project-list" id="projectList"></ul>
+    </div>
+    <div class="card">
+      <h3>✅ Kürzlich erledigt</h3>
+      <table>
+        <thead><tr><th>Zeit</th><th>Projekt</th><th>File</th><th>Typ</th></tr></thead>
+        <tbody id="doneTable"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Logs -->
+  <div class="card">
+    <h3>📋 Orchestrator Logs</h3>
+    <div class="log-area" id="logArea">Loading...</div>
+  </div>
+</div>
+
+<script>
+const CLIS_ORDER = ['claude', 'copilot', 'codex', 'aider'];
+
+async function refresh() {
+  try {
+    const [v4, logs] = await Promise.all([
+      fetch('/api/orchestrator/v4/status').then(r => r.json()),
+      fetch('/api/orchestrator/logs?limit=40').then(r => r.json()),
+    ]);
+    renderCLIs(v4.clis || {});
+    renderFallback(v4.clis || {});
+    renderProjects(v4.projects || {}, v4.priority_projects || []);
+    renderDone(v4.recent_done || []);
+    renderConfig(v4);
+    renderLogs(logs.logs || []);
+    document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+  } catch(e) {
+    console.error('Refresh failed', e);
+  }
+}
+
+function renderCLIs(clis) {
+  const el = document.getElementById('cliGrid');
+  const names = {'claude':'Claude Code','copilot':'Copilot','codex':'Codex','aider':'Aider','ollama':'Ollama'};
+  el.innerHTML = Object.entries(clis).map(([k,v]) =>
+    `<div class="cli-item"><span class="dot ${v?'on':'off'}"></span>${names[k]||k}</div>`
+  ).join('');
+}
+
+function renderFallback(clis) {
+  const el = document.getElementById('fallbackChain');
+  el.innerHTML = CLIS_ORDER.map((cli, i) => {
+    const active = clis[cli];
+    const arrow = i < CLIS_ORDER.length - 1 ? '<span class="arrow">→</span>' : '';
+    return `<span class="cli-tag ${active?'active':'inactive'}">${cli}</span>${arrow}`;
+  }).join('');
+}
+
+function renderProjects(projects, priority) {
+  const el = document.getElementById('projectList');
+  // Sort: priority first
+  const sorted = Object.entries(projects).sort((a,b) => {
+    const ai = priority.indexOf(a[0]), bi = priority.indexOf(b[0]);
+    if (ai >= 0 && bi >= 0) return ai - bi;
+    if (ai >= 0) return -1;
+    if (bi >= 0) return 1;
+    return a[0].localeCompare(b[0]);
+  });
+  
+  el.innerHTML = sorted.map(([name, info]) => {
+    const isPrio = priority.includes(name);
+    const types = info.task_types || {};
+    const badges = Object.entries(types).map(([t,c]) =>
+      `<span class="badge badge-${t}">${t}: ${c}</span>`
+    ).join(' ');
+    return `<li class="project-item">
+      <span class="project-name ${isPrio?'priority':''}">${isPrio?'⭐ ':''}${name}</span>
+      <span>${badges} <span class="badge badge-count">${info.pending_tasks} pending</span></span>
+    </li>`;
+  }).join('');
+}
+
+function renderDone(done) {
+  const el = document.getElementById('doneTable');
+  el.innerHTML = done.slice().reverse().slice(0, 15).map(d => {
+    const t = d.ts ? new Date(d.ts).toLocaleTimeString() : '?';
+    return `<tr>
+      <td>${t}</td>
+      <td>${d.project||''}</td>
+      <td style="font-family:monospace;font-size:.85em">${d.file||''}</td>
+      <td><span class="badge badge-${d.type||'todo'}">${d.type||''}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+function renderConfig(data) {
+  const el = document.getElementById('configInfo');
+  el.innerHTML = `
+    <div>📦 Max Tasks/Run: <strong>${data.max_tasks_per_run || 5}</strong></div>
+    <div>📤 Auto-Push: <strong>${data.auto_push ? '✅' : '❌'}</strong></div>
+    <div>💾 Auto-Commit: <strong>${data.auto_commit ? '✅' : '❌'}</strong></div>
+    <div>⏰ Cron: <strong>*/10 6-22 Uhr</strong></div>
+  `;
+}
+
+function renderLogs(logs) {
+  const el = document.getElementById('logArea');
+  el.innerHTML = logs.map(line => {
+    let cls = '';
+    if (line.includes('✅')) cls = 'ok';
+    else if (line.includes('❌')) cls = 'fail';
+    else if (line.includes('🚀') || line.includes('📦')) cls = 'info';
+    const ts = line.match(/^\[([^\]]+)\]/);
+    if (ts) {
+      return `<div class="log-line"><span class="ts">[${ts[1]}]</span><span class="${cls}">${line.slice(ts[0].length)}</span></div>`;
+    }
+    return `<div class="log-line ${cls}">${line}</div>`;
+  }).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+refresh();
+setInterval(refresh, 15000);
+</script>
 </body>
 </html>

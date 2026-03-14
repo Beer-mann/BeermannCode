@@ -6,10 +6,11 @@ Multi-Project Orchestrator — nutzt agents.json Config.
 Scannt ALLE Projekte, findet echte Tasks, fixt sie mit verfügbaren CLIs.
 
 CLIs (Fallback-Kette):
-  1. Claude CLI (claude code) — bestes Ergebnis
-  2. Codex CLI — schnell, gut für Code-Gen
-  3. Aider + Ollama — kostenlos, wenn Ollama online
-  4. Aider + OpenAI — Fallback
+  1. Claude CLI (claude -p) — bestes Ergebnis
+  2. Copilot CLI (copilot -p) — kostenlos via GitHub
+  3. Codex CLI — schnell, gut für Code-Gen
+  4. Aider + Ollama — kostenlos, wenn Ollama online
+  5. Aider + OpenAI — Fallback
 
 Features:
   - Multi-project mit Priority (TradingBot, VoiceOpsAI first)
@@ -165,11 +166,12 @@ def detect_clis() -> dict[str, bool]:
     global AVAILABLE_CLIS
     AVAILABLE_CLIS = {
         "claude": check_cli("claude"),
+        "copilot": check_cli("copilot"),
         "codex": check_cli("codex"),
         "aider": check_cli("aider"),
         "ollama": check_ollama(),
     }
-    log(f"🔧 CLIs: {', '.join(f'{k} {'✅' if v else '❌'}' for k, v in AVAILABLE_CLIS.items())}")
+    log(f"🔧 CLIs: {', '.join(f'{k} ✅' if v else f'{k} ❌' for k, v in AVAILABLE_CLIS.items())}")
     return AVAILABLE_CLIS
 
 
@@ -181,6 +183,24 @@ def run_with_claude(task: str, project_dir: Path, files: list[str] | None = None
     """Run task with Claude Code CLI."""
     try:
         cmd = ["claude", "-p", "--output-format", "text", task]
+        result = subprocess.run(
+            cmd,
+            cwd=str(project_dir),
+            capture_output=True,
+            text=True,
+            timeout=TASK_TIMEOUT,
+        )
+        return result.returncode == 0, (result.stdout or result.stderr)[-300:]
+    except subprocess.TimeoutExpired:
+        return False, "timeout"
+    except Exception as e:
+        return False, str(e)[:200]
+
+
+def run_with_copilot(task: str, project_dir: Path, files: list[str] | None = None) -> tuple[bool, str]:
+    """Run task with GitHub Copilot CLI (free via GitHub subscription)."""
+    try:
+        cmd = ["copilot", "-p", "--output-format", "text", task]
         result = subprocess.run(
             cmd,
             cwd=str(project_dir),
@@ -261,6 +281,8 @@ def run_task_with_fallback(task: str, project_dir: Path, files: list[str] | None
     runners = []
     if AVAILABLE_CLIS.get("claude"):
         runners.append(("claude", run_with_claude))
+    if AVAILABLE_CLIS.get("copilot"):
+        runners.append(("copilot", run_with_copilot))
     if AVAILABLE_CLIS.get("codex"):
         runners.append(("codex", run_with_codex))
     if AVAILABLE_CLIS.get("aider"):
@@ -512,6 +534,64 @@ def run_cycle() -> dict:
     log("=" * 70)
 
     return results
+
+
+def get_status_json() -> dict:
+    """Generate status JSON for the web dashboard."""
+    config = load_config()
+    projects = get_project_order(config)
+
+    # Recent done tasks
+    recent_done = []
+    if DONE_FILE.exists():
+        try:
+            lines = DONE_FILE.read_text().strip().splitlines()
+            for line in lines[-20:]:
+                recent_done.append(json.loads(line))
+        except Exception:
+            pass
+
+    # Recent skips
+    recent_skips = []
+    if SKIP_FILE.exists():
+        try:
+            lines = SKIP_FILE.read_text().strip().splitlines()
+            for line in lines[-10:]:
+                recent_skips.append(json.loads(line))
+        except Exception:
+            pass
+
+    # CLI status
+    clis = {
+        "claude": check_cli("claude"),
+        "copilot": check_cli("copilot"),
+        "codex": check_cli("codex"),
+        "aider": check_cli("aider"),
+        "ollama": check_ollama(),
+    }
+
+    # Task counts per project
+    project_stats = {}
+    for name in projects:
+        d = PROJECTS_DIR / name
+        if d.is_dir():
+            tasks = discover_tasks(d)
+            project_stats[name] = {"pending_tasks": len(tasks), "task_types": {}}
+            for t in tasks:
+                tt = t["type"]
+                project_stats[name]["task_types"][tt] = project_stats[name]["task_types"].get(tt, 0) + 1
+
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "clis": clis,
+        "projects": project_stats,
+        "priority_projects": PRIORITY_PROJECTS,
+        "max_tasks_per_run": MAX_TASKS,
+        "recent_done": recent_done,
+        "recent_skips": recent_skips,
+        "auto_push": AUTO_PUSH,
+        "auto_commit": AUTO_COMMIT,
+    }
 
 
 def main():

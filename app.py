@@ -12,7 +12,8 @@ app = Flask(__name__)
 
 # Orchestrator paths
 WORKSPACE = Path("/home/shares/beermann")
-LOG_FILE = WORKSPACE / "logs" / "orchestrator-v3.log"
+LOG_FILE = WORKSPACE / "logs" / "orchestrator-v4.log"
+LOG_FILE_V3 = WORKSPACE / "logs" / "orchestrator-v3.log"  # legacy
 STATE_FILE = WORKSPACE / "logs" / "orchestrator-state.json"
 TASK_QUEUE = WORKSPACE / "tasks" / "pending.jsonl"
 
@@ -206,22 +207,29 @@ def orchestrator_agents():
     else:
         agents["claude"] = {"status": "not_installed"}
     
-    # GitHub Copilot CLI
-    gh_path = shutil.which("gh")
-    if gh_path:
+    # GitHub Copilot CLI (standalone)
+    copilot_path = shutil.which("copilot")
+    if copilot_path:
         try:
-            # Check if copilot extension is installed
-            result = subprocess.run(["gh", "extension", "list"], capture_output=True, text=True, timeout=3)
-            if "copilot" in result.stdout.lower():
-                agents["github_copilot"] = {"status": "installed", "version": "gh extension", "path": gh_path}
-            else:
-                agents["github_copilot"] = {"status": "extension_missing"}
+            version = subprocess.check_output(["copilot", "--version"], stderr=subprocess.STDOUT, timeout=3, text=True).strip()
+            agents["copilot"] = {"status": "installed", "version": version, "path": copilot_path}
         except:
-            agents["github_copilot"] = {"status": "unknown"}
+            agents["copilot"] = {"status": "installed", "version": "unknown", "path": copilot_path}
     else:
-        agents["github_copilot"] = {"status": "not_installed"}
+        agents["copilot"] = {"status": "not_installed"}
     
     return jsonify({"agents": agents, "total": len([a for a in agents.values() if a.get("status") == "installed"])})
+
+
+@app.route("/api/orchestrator/v4/status")
+def orchestrator_v4_status():
+    """Get comprehensive v4 orchestrator status for dashboard."""
+    try:
+        sys.path.insert(0, str(WORKSPACE / "PROJECTS" / "BeermannCode"))
+        from orchestrator_v4 import get_status_json
+        return jsonify(get_status_json())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/languages")
