@@ -55,14 +55,19 @@ DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
 OLLAMA_URL = os.getenv("OLLAMA_API_BASE", "http://192.168.0.213:11434")
 
 # Priority projects (first in queue)
-PRIORITY_PROJECTS = ["TradingBot", "VoiceOpsAI", "BCN"]
+PRIORITY_PROJECTS = ["TradingBot"]
 
 # Dirs to exclude from scanning
 EXCLUDE_DIRS = {
-    "node_modules", ".venv", "venv", "__pycache__", ".git", "dist", "build",
+    "node_modules", ".venv", "venv", ".test-venv", "test-venv",
+    "__pycache__", ".git", "dist", "build",
     "flask", "werkzeug", "jinja2", "itsdangerous", "markupsafe", "blinker",
     "click", "flask_cors", ".aider.tags.cache.v4", "static", "templates",
+    "site-packages", "lib", "egg-info",
 }
+
+# Projects to skip entirely (don't let the orchestrator fix itself)
+EXCLUDE_PROJECTS = {"BeermannCode"}
 
 # File extensions to scan
 CODE_EXTENSIONS = {".py", ".js", ".ts", ".jsx", ".tsx"}
@@ -447,7 +452,7 @@ def get_project_order(config: dict) -> list[str]:
     for d in PROJECTS_DIR.iterdir():
         if d.is_dir() and (d / ".git").exists():
             name = d.name
-            if name not in ("test-project", "test-project-clean", "test-project-pr"):
+            if name not in ("test-project", "test-project-clean", "test-project-pr") and name not in EXCLUDE_PROJECTS:
                 all_projects.add(name)
 
     # Order: priority first, then rest alphabetically
