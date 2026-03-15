@@ -395,7 +395,37 @@ def spawn_project_agent(
                     if pr_match:
                         pr_url = pr_match.group(0)
                         log(f"🔗 PR detected: {pr_url}")
-                        send_whatsapp(f"🦅 *{project_name}* PR\n\n🔧 {task_type}\n🔗 {pr_url}")
+                        
+                        # Get detailed commit info
+                        try:
+                            commit_result = subprocess.run(
+                                ["git", "-C", str(project_dir), "log", "-1", "--pretty=format:%B"],
+                                capture_output=True,
+                                text=True,
+                                timeout=5
+                            )
+                            commit_msg = commit_result.stdout.strip()[:200]  # First 200 chars
+                            
+                            # Get changed files count
+                            files_result = subprocess.run(
+                                ["git", "-C", str(project_dir), "log", "-1", "--name-status"],
+                                capture_output=True,
+                                text=True,
+                                timeout=5
+                            )
+                            files_info = files_result.stdout.strip().split('\n')[1:]  # Skip commit hash
+                            changed_files = len(files_info)
+                            
+                            msg = f"🦅 *{project_name}* PR\n\n"
+                            msg += f"🔧 {task_type.upper()}\n"
+                            msg += f"📝 {commit_msg}\n"
+                            msg += f"📁 {changed_files} files changed\n"
+                            msg += f"🔗 {pr_url}"
+                        except Exception as e:
+                            # Fallback if git info fails
+                            msg = f"🦅 *{project_name}* PR\n\n🔧 {task_type}\n🔗 {pr_url}"
+                        
+                        send_whatsapp(msg)
                 
                 return True, output[:500]
             else:
