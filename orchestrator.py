@@ -647,11 +647,17 @@ def run_orchestration_cycle() -> dict[str, Any]:
     # This prevents one hanging project from blocking others
     
     impl_results = {}
+    processed_projects = set()
     
     # Pre-calculate task types for all projects
     project_tasks = {}
     for project_name in projects_to_improve:
         project_dir = PROJECTS_DIR / project_name
+
+        # Skip repos with open PRs to avoid conflicts
+        if has_open_prs(project_dir):
+            log(f"[SKIP] {project_name}: open PR exists (avoid conflicts)")
+            continue
         
         # Priority: ui → tests → improve
         # Check for UI in common locations
@@ -680,7 +686,7 @@ def run_orchestration_cycle() -> dict[str, Any]:
     with ThreadPoolExecutor(max_workers=4) as executor:
         futures = {
             executor.submit(spawn_project_agent, project_name, project_tasks[project_name]): project_name
-            for project_name in projects_to_improve
+            for project_name in project_tasks.keys()
         }
         
         for future in as_completed(futures):
@@ -695,6 +701,7 @@ def run_orchestration_cycle() -> dict[str, Any]:
                 results["agents_run"][project_name] = impl_results[project_name]
                 status = "✅" if success else "❌"
                 log(f"[DONE] {status} {project_name}")
+                processed_projects.add(project_name)
             except TimeoutError:
                 log(f"[TIMEOUT] {project_name} exceeded 20 min limit")
                 impl_results[project_name] = {
@@ -768,6 +775,11 @@ def run_orchestration_cycle() -> dict[str, Any]:
             continue
         if project_dir.name in exclude_patterns:
             continue  # Skip test projects only
+        if project_dir.name in processed_projects:
+            continue  # Already handled in Step 2
+        if has_open_prs(project_dir):
+            log(f"[SKIP] {project_dir.name}: open PR exists (avoid conflicts)")
+            continue
         
         # Check if has GitHub remote
         try:
