@@ -34,6 +34,13 @@ class TestDetectFramework:
 
         assert make_runner().detect_framework(str(tmp_path)) == "pytest"
 
+    def test_detects_unittest_from_unittest_style_files(self, tmp_path):
+        (tmp_path / "tests.py").write_text(
+            "import unittest\n\nclass DemoTest(unittest.TestCase):\n    pass\n"
+        )
+
+        assert make_runner().detect_framework(str(tmp_path)) == "unittest"
+
     def test_detects_jest_from_package_json(self, tmp_path):
         (tmp_path / "package.json").write_text(
             json.dumps({"scripts": {"test": "jest --runInBand"}})
@@ -160,6 +167,36 @@ class TestFrameworkRunners:
         assert result.failed == 1
         assert result.failures == [
             {"test": "suite fail", "reason": "expected true to be false"}
+        ]
+
+    def test_run_unittest_parses_failure_summary(self, monkeypatch, tmp_path):
+        output = (
+            "test_ok (tests.SampleTest.test_ok) ... ok\n"
+            "test_fail (tests.SampleTest.test_fail) ... FAIL\n\n"
+            "======================================================================\n"
+            "FAIL: test_fail (tests.SampleTest.test_fail)\n"
+            "----------------------------------------------------------------------\n"
+            "Traceback (most recent call last):\n"
+            "AssertionError: boom\n\n"
+            "----------------------------------------------------------------------\n"
+            "Ran 2 tests in 0.015s\n\n"
+            "FAILED (failures=1)\n"
+        )
+        monkeypatch.setattr(
+            subprocess,
+            "run",
+            lambda *args, **kwargs: SimpleNamespace(stdout="", stderr=output),
+        )
+
+        result = make_runner()._run_unittest(str(tmp_path))
+
+        assert result.total == 2
+        assert result.passed == 1
+        assert result.failed == 1
+        assert result.errors == 0
+        assert result.duration_seconds == 0.015
+        assert result.failures == [
+            {"test": "test_fail", "reason": "unittest failure"}
         ]
 
     def test_run_go_test_parses_pass_and_fail_counts(self, monkeypatch, tmp_path):

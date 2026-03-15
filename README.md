@@ -17,7 +17,10 @@ An AI-powered platform specifically designed for software development projects. 
 git clone https://github.com/Beer-mann/BeermannCode.git
 cd BeermannCode
 
-# No additional dependencies required - uses Python standard library
+# Install dependencies
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
 ## 🎯 Quick Start
