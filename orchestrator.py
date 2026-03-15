@@ -579,13 +579,14 @@ def run_orchestration_cycle() -> dict[str, Any]:
     log("\n🔧 Step 2: Spawn Coding Agents for GitHub Projects")
     log("-" * 60)
     
-    # Scan all GitHub projects
+    # Scan all GitHub projects (exclude test projects)
+    exclude_patterns = ["BeermannCode", "test-project", "test-project-clean", "test-project-pr"]
     projects_to_improve = []
     for project_dir in PROJECTS_DIR.iterdir():
         if not project_dir.is_dir() or not (project_dir / ".git").exists():
             continue
-        if project_dir.name == "BeermannCode":
-            continue  # Don't work on self
+        if project_dir.name in exclude_patterns:
+            continue  # Skip self and test projects
         projects_to_improve.append(project_dir.name)
     
     log(f"Found {len(projects_to_improve)} projects: {', '.join(projects_to_improve)}")
@@ -708,11 +709,14 @@ def run_orchestration_cycle() -> dict[str, Any]:
     log("\n🐙 Step 5: GitHub Project Agents (Spawn for each repo)")
     log("-" * 60)
     
-    # Scan all GitHub projects and spawn agents
+    # Scan all GitHub projects and spawn agents (exclude test projects)
+    exclude_patterns = ["BeermannCode", "test-project", "test-project-clean", "test-project-pr"]
     github_projects = []
     for project_dir in PROJECTS_DIR.iterdir():
         if not project_dir.is_dir() or not (project_dir / ".git").exists():
             continue
+        if project_dir.name in exclude_patterns:
+            continue  # Skip self and test projects
         
         # Check if has GitHub remote
         try:
