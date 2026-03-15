@@ -1,4 +1,5 @@
 import os
+import sys
 import tempfile
 import json
 from pathlib import Path
@@ -12,7 +13,8 @@ app = Flask(__name__)
 
 # Orchestrator paths
 WORKSPACE = Path("/home/shares/beermann")
-LOG_FILE = WORKSPACE / "logs" / "orchestrator-v3.log"
+LOG_FILE = WORKSPACE / "logs" / "orchestrator-v4.log"
+LOG_FILE_V3 = WORKSPACE / "logs" / "orchestrator-v3.log"  # legacy
 STATE_FILE = WORKSPACE / "logs" / "orchestrator-state.json"
 TASK_QUEUE = WORKSPACE / "tasks" / "pending.jsonl"
 
@@ -38,6 +40,19 @@ reviewer = CodeReviewer(config)
 generator = CodeGenerator(config)
 
 
+def _get_json_payload(required_fields=None):
+    """Return a validated JSON payload or an error response tuple."""
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return None, (jsonify({"error": "Expected a JSON object payload"}), 400)
+
+    for field in required_fields or []:
+        if field not in data:
+            return None, (jsonify({"error": f"Missing '{field}' field"}), 400)
+
+    return data, None
+
+
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -52,6 +67,37 @@ def dashboard():
 @app.route("/health")
 def health():
     return jsonify({"status": "ok", "service": "BeermannCode"})
+
+
+@app.route("/api/studio/overview")
+def studio_overview():
+    """Provide lightweight metadata for the main studio UI."""
+    return jsonify({
+        "status": "ok",
+        "service": "BeermannCode",
+        "port": 5004,
+        "workflows": [
+            {
+                "id": "analyze",
+                "label": "Analyze",
+                "description": "Inspect complexity, quality score, and issue hotspots.",
+                "endpoint": "/analyze",
+            },
+            {
+                "id": "review",
+                "label": "Review",
+                "description": "Generate maintainability, safety, and style feedback.",
+                "endpoint": "/review",
+            },
+            {
+                "id": "generate",
+                "label": "Generate",
+                "description": "Turn a short prompt into implementation scaffolding.",
+                "endpoint": "/generate",
+            },
+        ],
+        "languages": list(LANGUAGE_EXTENSIONS.keys()),
+    })
 
 
 # ============================================================================
@@ -87,9 +133,9 @@ def orchestrator_status():
                         status = task.get('status', 'unknown')
                         if status in task_stats:
                             task_stats[status] += 1
-                    except:
+                    except json.JSONDecodeError:
                         pass
-        
+
         return jsonify({
             "status": "ok",
             "last_cycle": state.get("last_cycle", {}),
@@ -127,7 +173,7 @@ def orchestrator_tasks():
                     if line.strip():
                         try:
                             tasks.append(json.loads(line))
-                        except:
+                        except json.JSONDecodeError:
                             pass
         
         # Group by status
@@ -147,18 +193,21 @@ def orchestrator_tasks():
         return jsonify({"error": str(e)}), 500
 
 
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://192.168.0.213:11434")
+
+
 @app.route("/api/orchestrator/ollama")
 def orchestrator_ollama():
     """Check Ollama status"""
     try:
         import requests
-        resp = requests.get("http://192.168.0.213:11434/api/tags", timeout=3)
+        resp = requests.get(f"{OLLAMA_HOST}/api/tags", timeout=3)
         if resp.status_code == 200:
             models = resp.json().get('models', [])
             return jsonify({
                 "status": "online",
                 "models_count": len(models),
-                "host": "192.168.0.213:11434"
+                "host": OLLAMA_HOST.removeprefix("http://").removeprefix("https://")
             })
         return jsonify({"status": "error", "message": "Unexpected response"}), 500
     except Exception as e:
@@ -179,7 +228,7 @@ def orchestrator_agents():
         try:
             version = subprocess.check_output(["aider", "--version"], stderr=subprocess.STDOUT, timeout=3, text=True).strip()
             agents["aider"] = {"status": "installed", "version": version, "path": aider_path}
-        except:
+        except (subprocess.SubprocessError, OSError):
             agents["aider"] = {"status": "installed", "version": "unknown", "path": aider_path}
     else:
         agents["aider"] = {"status": "not_installed"}
@@ -190,7 +239,7 @@ def orchestrator_agents():
         try:
             version = subprocess.check_output(["codex", "--version"], timeout=3, text=True).strip()
             agents["codex"] = {"status": "installed", "version": version, "path": codex_path}
-        except:
+        except (subprocess.SubprocessError, OSError):
             agents["codex"] = {"status": "installed", "version": "unknown", "path": codex_path}
     else:
         agents["codex"] = {"status": "not_installed"}
@@ -201,27 +250,34 @@ def orchestrator_agents():
         try:
             version = subprocess.check_output(["claude", "--version"], timeout=3, text=True).strip()
             agents["claude"] = {"status": "installed", "version": version, "path": claude_path}
-        except:
+        except (subprocess.SubprocessError, OSError):
             agents["claude"] = {"status": "installed", "version": "unknown", "path": claude_path}
     else:
         agents["claude"] = {"status": "not_installed"}
     
-    # GitHub Copilot CLI
-    gh_path = shutil.which("gh")
-    if gh_path:
+    # GitHub Copilot CLI (standalone)
+    copilot_path = shutil.which("copilot")
+    if copilot_path:
         try:
-            # Check if copilot extension is installed
-            result = subprocess.run(["gh", "extension", "list"], capture_output=True, text=True, timeout=3)
-            if "copilot" in result.stdout.lower():
-                agents["github_copilot"] = {"status": "installed", "version": "gh extension", "path": gh_path}
-            else:
-                agents["github_copilot"] = {"status": "extension_missing"}
-        except:
-            agents["github_copilot"] = {"status": "unknown"}
+            version = subprocess.check_output(["copilot", "--version"], stderr=subprocess.STDOUT, timeout=3, text=True).strip()
+            agents["copilot"] = {"status": "installed", "version": version, "path": copilot_path}
+        except (subprocess.SubprocessError, OSError):
+            agents["copilot"] = {"status": "installed", "version": "unknown", "path": copilot_path}
     else:
-        agents["github_copilot"] = {"status": "not_installed"}
+        agents["copilot"] = {"status": "not_installed"}
     
     return jsonify({"agents": agents, "total": len([a for a in agents.values() if a.get("status") == "installed"])})
+
+
+@app.route("/api/orchestrator/v4/status")
+def orchestrator_v4_status():
+    """Get comprehensive v4 orchestrator status for dashboard."""
+    try:
+        sys.path.insert(0, str(WORKSPACE / "PROJECTS" / "BeermannCode"))
+        from orchestrator_v4 import get_status_json
+        return jsonify(get_status_json())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/languages")
@@ -231,12 +287,15 @@ def languages():
 
 @app.route("/analyze", methods=["POST"])
 def analyze():
-    data = request.get_json()
-    if not data or "code" not in data:
-        return jsonify({"error": "Missing 'code' field"}), 400
+    data, error = _get_json_payload(required_fields=["code"])
+    if error:
+        return error
 
     code = data["code"]
     language = data.get("language", "python")
+
+    if not isinstance(code, str) or not code.strip():
+        return jsonify({"error": "'code' must be a non-empty string"}), 400
 
     if language not in LANGUAGE_EXTENSIONS:
         return jsonify({"error": f"Unsupported language '{language}'. See /languages."}), 400
@@ -260,12 +319,15 @@ def analyze():
 
 @app.route("/review", methods=["POST"])
 def review():
-    data = request.get_json()
-    if not data or "code" not in data:
-        return jsonify({"error": "Missing 'code' field"}), 400
+    data, error = _get_json_payload(required_fields=["code"])
+    if error:
+        return error
 
     code = data["code"]
     language = data.get("language", "python")
+
+    if not isinstance(code, str) or not code.strip():
+        return jsonify({"error": "'code' must be a non-empty string"}), 400
 
     if language not in LANGUAGE_EXTENSIONS:
         return jsonify({"error": f"Unsupported language '{language}'. See /languages."}), 400
@@ -278,9 +340,9 @@ def review():
 
 @app.route("/generate", methods=["POST"])
 def generate():
-    data = request.get_json()
-    if not data or "description" not in data:
-        return jsonify({"error": "Missing 'description' field"}), 400
+    data, error = _get_json_payload(required_fields=["description"])
+    if error:
+        return error
 
     language = data.get("language", "python")
     description = data["description"]
@@ -288,6 +350,13 @@ def generate():
     args = data.get("args", [])
     include_comments = data.get("include_comments", True)
     include_tests = data.get("include_tests", False)
+
+    if not isinstance(description, str) or not description.strip():
+        return jsonify({"error": "'description' must be a non-empty string"}), 400
+    if function_name is not None and (not isinstance(function_name, str) or not function_name.strip()):
+        return jsonify({"error": "'function_name' must be a non-empty string when provided"}), 400
+    if not isinstance(args, list) or any(not isinstance(arg, str) or not arg.strip() for arg in args):
+        return jsonify({"error": "'args' must be a list of non-empty strings"}), 400
 
     if language not in LANGUAGE_EXTENSIONS:
         return jsonify({"error": f"Unsupported language '{language}'. See /languages."}), 400

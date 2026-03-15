@@ -4,7 +4,7 @@
 # - Daily Summary: 18:00 Uhr
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ORCHESTRATOR="$SCRIPT_DIR/orchestrator_v3.py"
+ORCHESTRATOR="$SCRIPT_DIR/orchestrator_v4.py"
 NOTIFIER="$SCRIPT_DIR/whatsapp_notifier.py"
 LOG_FILE="/home/shares/beermann/logs/orchestrator-v3.log"
 

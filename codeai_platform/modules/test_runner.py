@@ -15,7 +15,7 @@ from pathlib import Path
 class TestResult:
     """Result of a test run."""
     project: str
-    framework: str  # pytest, jest, go-test, cargo-test
+    framework: str  # pytest, unittest, jest, go-test, cargo-test
     total: int = 0
     passed: int = 0
     failed: int = 0
@@ -25,6 +25,7 @@ class TestResult:
     failures: List[Dict] = None
     coverage_percent: float = 0.0
     raw_output: str = ""
+    __test__ = False
 
     def __post_init__(self):
         if self.failures is None:
@@ -53,6 +54,8 @@ class TestResult:
 class TestRunner:
     """Discovers and runs tests across projects."""
 
+    __test__ = False
+
     def __init__(self, config):
         self.config = config
 
@@ -69,6 +72,8 @@ class TestRunner:
                 return "pytest"
         if any(project.rglob("test_*.py")):
             return "pytest"
+        if any(project.rglob("tests.py")) or any(project.rglob("test*.py")):
+            return "unittest"
 
         # JavaScript/TypeScript
         pkg_json = project / "package.json"
@@ -110,6 +115,7 @@ class TestRunner:
 
         runners = {
             "pytest": self._run_pytest,
+            "unittest": self._run_unittest,
             "jest": self._run_jest,
             "go-test": self._run_go_test,
             "cargo-test": self._run_cargo_test,
@@ -213,6 +219,69 @@ class TestRunner:
             result.errors = 1
         except FileNotFoundError:
             result.raw_output = "npx/jest not found"
+
+        return result
+
+    def _run_unittest(self, project_path: str) -> TestResult:
+        """Run Python unittest discovery and parse results."""
+        project = Path(project_path)
+        result = TestResult(project=project.name, framework="unittest")
+
+        try:
+            proc = subprocess.run(
+                ["python3", "-m", "unittest", "discover", "-v"],
+                cwd=project_path,
+                capture_output=True,
+                text=True,
+                timeout=120,
+                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+            )
+            result.raw_output = proc.stdout + proc.stderr
+
+            import re
+
+            success_summary = re.search(
+                r"Ran\s+(\d+)\s+tests?\s+in\s+([\d.]+)s\s+OK(?:\s+\(skipped=(\d+)\))?",
+                result.raw_output,
+                re.MULTILINE,
+            )
+            failure_summary = re.search(
+                r"Ran\s+(\d+)\s+tests?\s+in\s+([\d.]+)s\s+FAILED\s+\((.*?)\)",
+                result.raw_output,
+                re.MULTILINE,
+            )
+
+            if success_summary:
+                result.total = int(success_summary.group(1))
+                result.duration_seconds = float(success_summary.group(2))
+                result.skipped = int(success_summary.group(3) or 0)
+                result.passed = result.total - result.skipped
+            elif failure_summary:
+                result.total = int(failure_summary.group(1))
+                result.duration_seconds = float(failure_summary.group(2))
+                summary_bits = failure_summary.group(3)
+                failures_match = re.search(r"failures=(\d+)", summary_bits)
+                errors_match = re.search(r"errors=(\d+)", summary_bits)
+                skipped_match = re.search(r"skipped=(\d+)", summary_bits)
+                result.failed = int(failures_match.group(1)) if failures_match else 0
+                result.errors = int(errors_match.group(1)) if errors_match else 0
+                result.skipped = int(skipped_match.group(1)) if skipped_match else 0
+                result.passed = max(0, result.total - result.failed - result.errors - result.skipped)
+
+                failure_names = re.findall(
+                    r"^(?:FAIL|ERROR):\s+([^\s(]+)",
+                    result.raw_output,
+                    re.MULTILINE,
+                )
+                result.failures = [
+                    {"test": name, "reason": "unittest failure"} for name in failure_names
+                ]
+
+        except subprocess.TimeoutExpired:
+            result.raw_output = "Tests timed out after 120s"
+            result.errors = 1
+        except FileNotFoundError:
+            result.raw_output = "python3 not found"
 
         return result
 

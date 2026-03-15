@@ -3,141 +3,223 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BeermannCode</title>
+  <title>BeermannCode Studio</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
 </head>
 <body data-page="studio">
-  <div class="page-shell">
-    <header class="hero">
-      <div class="hero__content">
-        <p class="eyebrow">AI Software Workbench</p>
-        <h1>Analyze, review, and generate production-ready code from one browser tab.</h1>
-        <p class="hero__lede">
-          BeermannCode exposes the platform APIs through a modern studio UI for rapid code inspection,
-          generation, and orchestration visibility.
-        </p>
-        <div class="hero__actions">
-          <a class="button button--primary" href="#workspace">Open workspace</a>
-          <a class="button button--ghost" href="/dashboard">View live dashboard</a>
-        </div>
-        <dl class="hero__stats">
-          <div>
-            <dt>8</dt>
-            <dd>Languages supported</dd>
-          </div>
-          <div>
-            <dt>3</dt>
-            <dd>Core AI workflows</dd>
-          </div>
-          <div>
-            <dt>5004</dt>
-            <dd>Default local port</dd>
-          </div>
-        </dl>
+  <div class="site-bg" aria-hidden="true">
+    <div class="site-bg__mesh"></div>
+    <div class="site-bg__grain"></div>
+  </div>
+
+  <div class="page-shell page-shell--studio">
+    <header class="topbar">
+      <a class="brand" href="/">
+        <span class="brand__mark">BC</span>
+        <span class="brand__text">
+          <strong>BeermannCode</strong>
+          <small>AI development platform</small>
+        </span>
+      </a>
+      <div class="topbar__actions">
+        <a class="button button--ghost button--small" href="/dashboard">Live Dashboard</a>
+        <a class="button button--primary button--small" href="#studio">Open Studio</a>
       </div>
-      <aside class="hero__panel">
-        <div class="glass-card spotlight-card">
-          <p class="spotlight-card__label">Platform Endpoints</p>
-          <ul class="spotlight-list">
-            <li><span>POST</span> /analyze</li>
-            <li><span>POST</span> /review</li>
-            <li><span>POST</span> /generate</li>
-            <li><span>GET</span> /dashboard</li>
-          </ul>
-          <p class="spotlight-card__foot">Designed for local workflows, demos, and internal tooling.</p>
-        </div>
-      </aside>
     </header>
 
-    <main id="workspace" class="workspace">
-      <section class="glass-card workspace__controls">
-        <div>
-          <p class="section-label">Studio</p>
-          <h2>Code workspace</h2>
+    <main>
+      <section class="hero hero--studio">
+        <div class="hero__content">
+          <p class="eyebrow">Code Analysis, Review, and Generation</p>
+          <h1>A sharper browser front-end for the existing BeermannCode APIs.</h1>
+          <p class="hero__lede">
+            Run analysis, review risky code paths, and generate implementation scaffolding from one screen.
+            The interface stays thin over the Flask backend, but the product surface now feels deliberate.
+          </p>
+          <div class="hero__actions">
+            <a class="button button--primary" href="#studio">Launch workspace</a>
+            <a class="button button--ghost" href="#platform">Inspect platform</a>
+          </div>
+          <div id="heroMetrics" class="hero-metrics">
+            <article class="metric-card">
+              <span class="metric-card__label">Service</span>
+              <strong id="serviceName">BeermannCode</strong>
+              <small id="serviceStatus">Loading status</small>
+            </article>
+            <article class="metric-card">
+              <span class="metric-card__label">Languages</span>
+              <strong id="languageCount">0</strong>
+              <small>Runtime-supported targets</small>
+            </article>
+            <article class="metric-card">
+              <span class="metric-card__label">Workflows</span>
+              <strong id="workflowCount">3</strong>
+              <small>Analyze, review, generate</small>
+            </article>
+          </div>
         </div>
-        <div class="toolbar">
-          <label class="field">
-            <span>Language</span>
-            <select id="languageSelect">
-              <option value="python">Python</option>
-              <option value="javascript">JavaScript</option>
-              <option value="java">Java</option>
-              <option value="cpp">C++</option>
-              <option value="c">C</option>
-              <option value="csharp">C#</option>
-              <option value="go">Go</option>
-              <option value="rust">Rust</option>
-            </select>
-          </label>
-          <nav class="segmented" aria-label="Mode selector">
-            <button class="segmented__item is-active" type="button" data-mode="analyze">Analyze</button>
-            <button class="segmented__item" type="button" data-mode="review">Review</button>
-            <button class="segmented__item" type="button" data-mode="generate">Generate</button>
-          </nav>
-        </div>
+
+        <aside class="hero__stack">
+          <section class="glass-card command-card">
+            <div class="section-heading">
+              <div>
+                <p class="section-label">API Surface</p>
+                <h2>Available endpoints</h2>
+              </div>
+              <span class="status-chip" id="healthChip">Checking</span>
+            </div>
+            <div id="workflowCards" class="workflow-list"></div>
+          </section>
+
+          <section class="glass-card quickstart-card">
+            <p class="section-label">Quick Start</p>
+            <h2>Run locally on port 5004</h2>
+            <pre class="command-line"><code>./start.sh</code></pre>
+            <p class="quickstart-card__note">The studio calls the same Flask endpoints documented in the README, so no separate frontend build pipeline is required.</p>
+          </section>
+        </aside>
       </section>
 
-      <section class="workspace__grid">
-        <div class="glass-card input-panel">
-          <div class="panel-heading">
+      <section id="platform" class="platform-grid">
+        <article class="glass-card platform-panel">
+          <div class="section-heading section-heading--tight">
             <div>
-              <p class="section-label" id="inputModeLabel">Code Input</p>
+              <p class="section-label">Platform</p>
+              <h2>Runtime snapshot</h2>
+            </div>
+          </div>
+          <div class="status-grid">
+            <div class="status-tile">
+              <span>Health</span>
+              <strong id="runtimeHealth">Loading</strong>
+              <small>Fetched from `/health`</small>
+            </div>
+            <div class="status-tile">
+              <span>Default Port</span>
+              <strong id="runtimePort">5004</strong>
+              <small>Configured in app docs</small>
+            </div>
+            <div class="status-tile">
+              <span>Languages</span>
+              <strong id="runtimeLanguages">Loading</strong>
+              <small>Loaded from `/api/studio/overview`</small>
+            </div>
+          </div>
+        </article>
+
+        <article class="glass-card platform-panel">
+          <div class="section-heading section-heading--tight">
+            <div>
+              <p class="section-label">Presets</p>
+              <h2>Starter prompts</h2>
+            </div>
+          </div>
+          <div id="presetRail" class="preset-rail"></div>
+        </article>
+      </section>
+
+      <section id="studio" class="studio-grid">
+        <div class="glass-card studio-panel studio-panel--input">
+          <div class="section-heading">
+            <div>
+              <p class="section-label">Workspace</p>
+              <h2>Interactive studio</h2>
+            </div>
+            <span class="status-chip status-chip--subtle">Live API</span>
+          </div>
+
+          <nav class="mode-switcher" aria-label="Workflow selector">
+            <button class="mode-switcher__item is-active" type="button" data-mode="analyze">Analyze</button>
+            <button class="mode-switcher__item" type="button" data-mode="review">Review</button>
+            <button class="mode-switcher__item" type="button" data-mode="generate">Generate</button>
+          </nav>
+
+          <div class="form-grid">
+            <label class="field">
+              <span>Language</span>
+              <select id="languageSelect"></select>
+            </label>
+            <div class="request-card">
+              <span class="request-card__label">Target endpoint</span>
+              <strong id="endpointLabel">POST /analyze</strong>
+              <small id="requestHint">Inspect complexity, quality score, and issue hotspots.</small>
+            </div>
+          </div>
+
+          <div class="input-shell">
+            <div id="codeInputWrap" class="input-stack">
+              <div class="input-shell__head">
+                <p id="inputModeLabel" class="section-label">Code Input</p>
+                <button id="loadPresetBtn" class="button button--ghost button--small" type="button">Load preset</button>
+              </div>
               <h3 id="inputTitle">Paste source code</h3>
+              <p id="inputHint" class="panel-heading__hint">Run analysis and reviews against code snippets.</p>
+              <textarea id="codeInput" rows="18" spellcheck="false" placeholder="Paste your code here..."></textarea>
             </div>
-            <p class="panel-heading__hint" id="inputHint">Run analysis and reviews against code snippets.</p>
-          </div>
 
-          <div id="codeInputWrap" class="input-stack">
-            <textarea id="codeInput" rows="18" spellcheck="false" placeholder="Paste your code here..."></textarea>
-          </div>
-
-          <div id="descInputWrap" class="input-stack is-hidden">
-            <textarea id="descInput" rows="8" placeholder="Describe the code you want to generate, for example: 'Create a Python function that validates webhook signatures and returns a typed result.'"></textarea>
-            <div class="toggle-row">
-              <label class="toggle">
-                <input type="checkbox" id="includeComments" checked>
-                <span>Include comments</span>
-              </label>
-              <label class="toggle">
-                <input type="checkbox" id="includeTests">
-                <span>Include tests</span>
-              </label>
+            <div id="descInputWrap" class="input-stack is-hidden">
+              <div class="input-shell__head">
+                <p class="section-label">Prompt</p>
+                <button id="loadPromptPresetBtn" class="button button--ghost button--small" type="button">Load preset</button>
+              </div>
+              <h3>Describe generated code</h3>
+              <p class="panel-heading__hint">Use a concrete engineering task instead of a vague prompt for better output.</p>
+              <textarea id="descInput" rows="10" placeholder="Create a Python function that validates webhook signatures and returns a typed result."></textarea>
+              <div class="toggle-row">
+                <label class="toggle">
+                  <input type="checkbox" id="includeComments" checked>
+                  <span>Include comments</span>
+                </label>
+                <label class="toggle">
+                  <input type="checkbox" id="includeTests">
+                  <span>Include tests</span>
+                </label>
+              </div>
             </div>
           </div>
 
-          <button id="runBtn" class="button button--primary button--block" type="button">
-            <span id="btnText">Analyze</span>
-            <span id="btnSpinner" class="button__spinner is-hidden" aria-hidden="true"></span>
-          </button>
+          <div class="action-row">
+            <button id="runBtn" class="button button--primary" type="button">
+              <span id="btnText">Analyze</span>
+              <span id="btnSpinner" class="button__spinner is-hidden" aria-hidden="true"></span>
+            </button>
+            <button id="clearBtn" class="button button--ghost" type="button">Clear</button>
+          </div>
 
           <div id="errorAlert" class="alert is-hidden" role="alert"></div>
         </div>
 
-        <div class="glass-card results-panel">
-          <div class="panel-heading">
+        <div class="glass-card studio-panel studio-panel--output">
+          <div class="section-heading">
             <div>
-              <p class="section-label">Output</p>
-              <h3>Results</h3>
+              <p class="section-label">Results</p>
+              <h2>Response surface</h2>
             </div>
-            <p class="panel-heading__hint">Responses update live from the existing Flask APIs.</p>
+            <div class="output-actions">
+              <button id="copyResultBtn" class="button button--ghost button--small" type="button">Copy output</button>
+            </div>
           </div>
 
           <div id="placeholder" class="placeholder-state">
-            <div class="placeholder-state__glyph">{"</>"}</div>
-            <h4>Select a workflow and submit input</h4>
-            <p>Quality metrics, review findings, and generated code will appear here.</p>
+            <div class="placeholder-state__icon">
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+            <h3>Select a workflow and submit input</h3>
+            <p>Results will stream back through the existing Flask endpoints and appear here with structured summaries.</p>
           </div>
 
           <section id="analyzeResult" class="result-panel">
-            <div class="metric-hero">
+            <div class="result-header">
               <div id="qualityCircle" class="score-badge score-badge--high">0</div>
               <div>
                 <p class="section-label">Analysis</p>
-                <h4>Quality score</h4>
+                <h3>Quality score</h3>
                 <p class="meta-line" id="analyzeLanguage"></p>
                 <p class="meta-line" id="analyzeLOC"></p>
                 <p class="meta-line" id="analyzeComplexity"></p>
@@ -149,11 +231,11 @@
           </section>
 
           <section id="reviewResult" class="result-panel">
-            <div class="metric-hero metric-hero--review">
+            <div class="result-header result-header--review">
               <span id="ratingBadge" class="pill pill--good">GOOD</span>
               <div>
                 <p class="section-label">Review</p>
-                <h4>Automated code review</h4>
+                <h3>Automated code review</h3>
                 <p class="meta-line" id="reviewMetrics"></p>
               </div>
             </div>
@@ -163,12 +245,12 @@
           </section>
 
           <section id="generateResult" class="result-panel">
-            <div class="panel-heading panel-heading--tight">
+            <div class="section-heading section-heading--tight">
               <div>
                 <p class="section-label">Generation</p>
-                <h4>Generated code</h4>
+                <h3>Generated code</h3>
               </div>
-              <button id="copyBtn" class="button button--ghost button--small" type="button">Copy</button>
+              <button id="copyBtn" class="button button--ghost button--small" type="button">Copy code</button>
             </div>
             <pre class="code-frame"><code id="generatedCode" class="language-python"></code></pre>
           </section>

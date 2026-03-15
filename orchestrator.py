@@ -17,9 +17,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -110,11 +112,13 @@ def release_lock() -> None:
 # ============================================================================
 
 def save_state(state: dict[str, Any]) -> None:
-    """Save orchestrator state"""
+    """Save orchestrator state atomically to prevent corruption on crash."""
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     state["last_run"] = datetime.now().isoformat()
-    with STATE_FILE.open("w", encoding="utf-8") as f:
+    tmp_file = STATE_FILE.with_suffix(".tmp")
+    with tmp_file.open("w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, ensure_ascii=False)
+    tmp_file.replace(STATE_FILE)  # atomic on POSIX
 
 
 def load_state() -> dict[str, Any]:
@@ -138,6 +142,24 @@ def load_agents_config() -> dict[str, Any]:
     except Exception as e:
         log(f"[ERROR] Failed to load agents.json: {e}")
         return {}
+
+
+def has_open_prs(project_dir: Path) -> bool:
+    """Return True if repo has any open PRs (avoid conflicts)."""
+    try:
+        pr_result = subprocess.run(
+            ["gh", "pr", "list", "--state", "open", "--json", "number"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=str(project_dir)
+        )
+        if pr_result.returncode != 0:
+            return False
+        data = json.loads(pr_result.stdout.strip() or "[]")
+        return len(data) > 0
+    except Exception:
+        return False
 
 
 # ============================================================================
@@ -342,7 +364,7 @@ def spawn_project_agent(
             timeout=5
         )
         repo_url = url_result.stdout.strip() if url_result.returncode == 0 else f"github.com/Beer-mann/{project_name}"
-    except:
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         repo_url = f"github.com/Beer-mann/{project_name}"
     
     # Generate branch name if not provided
@@ -363,21 +385,22 @@ def spawn_project_agent(
     
     # Try agents in order: claude → codex → copilot
     # All use their direct CLI (no OpenClaw, no API keys)
+    # IMPORTANT: Short timeouts per agent to prevent one project blocking others
     agents = [
-        ("claude", ["claude", "-p", task_prompt, "--dangerously-skip-permissions"]),
-        ("codex", ["codex", "exec", "--yolo", task_prompt]),
-        ("copilot", ["copilot", "-p", task_prompt, "--yolo", "--add-dir", str(project_dir)]),
+        ("claude", ["claude", "-p", task_prompt, "--dangerously-skip-permissions"], 300),  # 5 min
+        ("codex", ["codex", "exec", "--yolo", task_prompt], 600),  # 10 min
+        ("copilot", ["copilot", "-p", task_prompt, "--yolo", "--add-dir", str(project_dir)], 300),  # 5 min
     ]
     
-    for agent_name, cmd in agents:
+    for agent_name, cmd, timeout_sec in agents:
         try:
-            log(f"[SPAWN] Trying {agent_name} for {project_name}...")
+            log(f"[SPAWN] Trying {agent_name} for {project_name} (timeout: {timeout_sec}s)...")
             
             spawn_result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=1800,  # 30 min
+                timeout=timeout_sec,
                 cwd=str(project_dir)
             )
             
@@ -393,7 +416,37 @@ def spawn_project_agent(
                     if pr_match:
                         pr_url = pr_match.group(0)
                         log(f"🔗 PR detected: {pr_url}")
-                        send_whatsapp(f"🦅 *{project_name}* PR\n\n🔧 {task_type}\n🔗 {pr_url}")
+                        
+                        # Get detailed commit info
+                        try:
+                            commit_result = subprocess.run(
+                                ["git", "-C", str(project_dir), "log", "-1", "--pretty=format:%B"],
+                                capture_output=True,
+                                text=True,
+                                timeout=5
+                            )
+                            commit_msg = commit_result.stdout.strip()[:200]  # First 200 chars
+                            
+                            # Get changed files count
+                            files_result = subprocess.run(
+                                ["git", "-C", str(project_dir), "log", "-1", "--name-status"],
+                                capture_output=True,
+                                text=True,
+                                timeout=5
+                            )
+                            files_info = files_result.stdout.strip().split('\n')[1:]  # Skip commit hash
+                            changed_files = len(files_info)
+                            
+                            msg = f"🦅 *{project_name}* PR\n\n"
+                            msg += f"🔧 {task_type.upper()}\n"
+                            msg += f"📝 {commit_msg}\n"
+                            msg += f"📁 {changed_files} files changed\n"
+                            msg += f"🔗 {pr_url}"
+                        except Exception as e:
+                            # Fallback if git info fails
+                            msg = f"🦅 *{project_name}* PR\n\n🔧 {task_type}\n🔗 {pr_url}"
+                        
+                        send_whatsapp(msg)
                 
                 return True, output[:500]
             else:
@@ -458,7 +511,7 @@ def spawn_agent(
         
         # Run Aider
         env = os.environ.copy()
-        env["OLLAMA_API_BASE"] = "http://192.168.0.213:11434"
+        env["OLLAMA_API_BASE"] = os.getenv("OLLAMA_HOST", "http://192.168.0.213:11434")
         
         result = subprocess.run(
             [
@@ -577,22 +630,34 @@ def run_orchestration_cycle() -> dict[str, Any]:
     log("\n🔧 Step 2: Spawn Coding Agents for GitHub Projects")
     log("-" * 60)
     
-    # Scan all GitHub projects
+    # Scan all GitHub projects (exclude only test projects)
+    exclude_patterns = ["test-project", "test-project-clean", "test-project-pr"]
     projects_to_improve = []
     for project_dir in PROJECTS_DIR.iterdir():
         if not project_dir.is_dir() or not (project_dir / ".git").exists():
             continue
-        if project_dir.name == "BeermannCode":
-            continue  # Don't work on self
+        if project_dir.name in exclude_patterns:
+            continue  # Skip test projects only
         projects_to_improve.append(project_dir.name)
     
     log(f"Found {len(projects_to_improve)} projects: {', '.join(projects_to_improve)}")
     
-    # Spawn one agent per project (tasks: ui, todos, tests, docs)
+    # ========== PARALLEL SPAWNING ==========
+    # Spawn agents for all projects in parallel (max 4 concurrent)
+    # This prevents one hanging project from blocking others
+    
     impl_results = {}
+    processed_projects = set()
+    
+    # Pre-calculate task types for all projects
+    project_tasks = {}
     for project_name in projects_to_improve:
-        # Determine task type based on project state
         project_dir = PROJECTS_DIR / project_name
+
+        # Skip repos with open PRs to avoid conflicts
+        if has_open_prs(project_dir):
+            log(f"[SKIP] {project_name}: open PR exists (avoid conflicts)")
+            continue
         
         # Priority: ui → tests → improve
         # Check for UI in common locations
@@ -613,11 +678,46 @@ def run_orchestration_cycle() -> dict[str, Any]:
         else:
             task_type = "improve"  # General improvements
         
-        log(f"[{project_name}] Task: {task_type}")
+        project_tasks[project_name] = task_type
+        log(f"[QUEUE] {project_name}: {task_type}")
+    
+    # Spawn in parallel (max 4 at a time)
+    log("\n[PARALLEL] Spawning agents (max 4 concurrent)...")
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {
+            executor.submit(spawn_project_agent, project_name, project_tasks[project_name]): project_name
+            for project_name in project_tasks.keys()
+        }
         
-        success, output = spawn_project_agent(project_name, task_type)
-        impl_results[project_name] = {"success": success, "output": output[:200], "task_type": task_type}
-        results["agents_run"][project_name] = impl_results[project_name]
+        for future in as_completed(futures):
+            project_name = futures[future]
+            try:
+                success, output = future.result(timeout=1200)  # 20 min max per task
+                impl_results[project_name] = {
+                    "success": success,
+                    "output": output[:200],
+                    "task_type": project_tasks[project_name]
+                }
+                results["agents_run"][project_name] = impl_results[project_name]
+                status = "✅" if success else "❌"
+                log(f"[DONE] {status} {project_name}")
+                processed_projects.add(project_name)
+            except TimeoutError:
+                log(f"[TIMEOUT] {project_name} exceeded 20 min limit")
+                impl_results[project_name] = {
+                    "success": False,
+                    "output": "timeout",
+                    "task_type": project_tasks[project_name]
+                }
+                results["agents_run"][project_name] = impl_results[project_name]
+            except Exception as e:
+                log(f"[ERROR] {project_name}: {str(e)[:100]}")
+                impl_results[project_name] = {
+                    "success": False,
+                    "output": str(e)[:200],
+                    "task_type": project_tasks[project_name]
+                }
+                results["agents_run"][project_name] = impl_results[project_name]
     
     # ========== Step 3: Feature Agent (Continuous) ==========
     log("\n💡 Step 3: Feature Agent (Feature Proposals & Strategic Ideas)")
@@ -667,10 +767,18 @@ def run_orchestration_cycle() -> dict[str, Any]:
     log("\n🐙 Step 5: GitHub Project Agents (Spawn for each repo)")
     log("-" * 60)
     
-    # Scan all GitHub projects and spawn agents
+    # Scan all GitHub projects and spawn agents (exclude only test projects)
+    exclude_patterns = ["test-project", "test-project-clean", "test-project-pr"]
     github_projects = []
     for project_dir in PROJECTS_DIR.iterdir():
         if not project_dir.is_dir() or not (project_dir / ".git").exists():
+            continue
+        if project_dir.name in exclude_patterns:
+            continue  # Skip test projects only
+        if project_dir.name in processed_projects:
+            continue  # Already handled in Step 2
+        if has_open_prs(project_dir):
+            log(f"[SKIP] {project_dir.name}: open PR exists (avoid conflicts)")
             continue
         
         # Check if has GitHub remote
@@ -683,12 +791,14 @@ def run_orchestration_cycle() -> dict[str, Any]:
             )
             if remote_result.returncode == 0 and "github.com" in remote_result.stdout:
                 github_projects.append(project_dir.name)
-        except:
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
             pass
     
     log(f"Found {len(github_projects)} GitHub projects: {', '.join(github_projects)}")
     
-    # Spawn agent for each project (prioritize UI, then TODOs, then improvements)
+    # ========== PARALLEL SPAWNING FOR GITHUB PROJECTS ==========
+    # Pre-calculate task types
+    github_project_tasks = {}
     for project_name in github_projects:
         project_dir = PROJECTS_DIR / project_name
         
@@ -704,7 +814,7 @@ def run_orchestration_cycle() -> dict[str, Any]:
                 timeout=10
             )
             has_todos = result.returncode == 0
-        except:
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
             pass
         
         # Decide task type
@@ -715,16 +825,42 @@ def run_orchestration_cycle() -> dict[str, Any]:
         else:
             task_type = "improve"
         
-        log(f"Spawning {task_type} agent for {project_name}...")
-        success, output = spawn_project_agent(project_name, task_type)
-        
-        results["agents_run"][f"github_{project_name}_{task_type}"] = {
-            "success": success,
-            "output": output[:200]
+        github_project_tasks[project_name] = task_type
+        log(f"[GITHUB-QUEUE] {project_name}: {task_type}")
+    
+    # Spawn in parallel (max 4 at a time)
+    log("\n[GITHUB-PARALLEL] Spawning GitHub agents (max 4 concurrent)...")
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {
+            executor.submit(spawn_project_agent, project_name, github_project_tasks[project_name]): project_name
+            for project_name in github_projects
         }
         
-        # Rate limit between spawns
-        time.sleep(5)
+        for future in as_completed(futures):
+            project_name = futures[future]
+            try:
+                success, output = future.result(timeout=1200)  # 20 min max per task
+                results["agents_run"][f"github_{project_name}"] = {
+                    "success": success,
+                    "output": output[:200],
+                    "task_type": github_project_tasks[project_name]
+                }
+                status = "✅" if success else "❌"
+                log(f"[GITHUB-DONE] {status} {project_name}")
+            except TimeoutError:
+                log(f"[GITHUB-TIMEOUT] {project_name} exceeded 20 min limit")
+                results["agents_run"][f"github_{project_name}"] = {
+                    "success": False,
+                    "output": "timeout",
+                    "task_type": github_project_tasks[project_name]
+                }
+            except Exception as e:
+                log(f"[GITHUB-ERROR] {project_name}: {str(e)[:100]}")
+                results["agents_run"][f"github_{project_name}"] = {
+                    "success": False,
+                    "output": str(e)[:200],
+                    "task_type": github_project_tasks[project_name]
+                }
     
     # ========== Step 6: Auto-Commit & Auto-Push ==========
     if AUTO_COMMIT or AUTO_PUSH:
@@ -869,54 +1005,65 @@ def should_run_agent(agent_name: str) -> bool:
 # MAIN
 # ============================================================================
 
+def _handle_shutdown(signum: int, frame: object) -> None:
+    """Handle SIGTERM/SIGINT gracefully by releasing the lock before exit."""
+    log(f"[SIGNAL] Received signal {signum}, shutting down gracefully...")
+    release_lock()
+    sys.exit(1)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="🦅 BeermannCode Orchestrator v2.0")
     ap.add_argument("--dry-run", action="store_true", help="Simulate without executing")
     ap.add_argument("--agent", type=str, help="Run specific agent only")
     ap.add_argument("--no-notify", action="store_true", help="Disable WhatsApp notifications")
     ap.add_argument("--verbose", action="store_true", help="Verbose logging")
-    
+
     args = ap.parse_args()
-    
+
     # Override globals from args
     global NOTIFY_ENABLED, DRY_RUN
     if args.no_notify:
         NOTIFY_ENABLED = False
     if args.dry_run:
         DRY_RUN = True
-    
+
+    # Register shutdown handlers so the lock is released on SIGTERM/SIGINT
+    signal.signal(signal.SIGTERM, _handle_shutdown)
+    signal.signal(signal.SIGINT, _handle_shutdown)
+
     log("🦅 BeermannCode Orchestrator v2.0 starting...")
     log(f"Workspace: {WORKSPACE}")
     log(f"Config: {AGENTS_CONFIG}")
     log(f"Notifications: {'enabled' if NOTIFY_ENABLED else 'disabled'}")
     log(f"Dry-Run: {DRY_RUN}")
-    
+
     # Acquire lock
     if not acquire_lock():
         return 1
-    
+
     try:
         # Run orchestration cycle
         results = run_orchestration_cycle()
-        
+
         # Save state
         state = load_state()
         state["last_cycle"] = results
         save_state(state)
-        
+
         # Send summary
         if NOTIFY_ENABLED:
             send_cycle_summary(results)
-        
+
         log("\n✅ Orchestration cycle completed")
         return 0
-    
+
     except Exception as e:
         log(f"\n💥 Orchestration failed: {e}")
         import traceback
         log(traceback.format_exc())
         return 1
-    
+
     finally:
         release_lock()
 
