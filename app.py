@@ -1,4 +1,5 @@
 import os
+import sys
 import tempfile
 import json
 from pathlib import Path
@@ -119,9 +120,9 @@ def orchestrator_status():
                         status = task.get('status', 'unknown')
                         if status in task_stats:
                             task_stats[status] += 1
-                    except:
+                    except json.JSONDecodeError:
                         pass
-        
+
         return jsonify({
             "status": "ok",
             "last_cycle": state.get("last_cycle", {}),
@@ -159,7 +160,7 @@ def orchestrator_tasks():
                     if line.strip():
                         try:
                             tasks.append(json.loads(line))
-                        except:
+                        except json.JSONDecodeError:
                             pass
         
         # Group by status
@@ -179,18 +180,21 @@ def orchestrator_tasks():
         return jsonify({"error": str(e)}), 500
 
 
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://192.168.0.213:11434")
+
+
 @app.route("/api/orchestrator/ollama")
 def orchestrator_ollama():
     """Check Ollama status"""
     try:
         import requests
-        resp = requests.get("http://192.168.0.213:11434/api/tags", timeout=3)
+        resp = requests.get(f"{OLLAMA_HOST}/api/tags", timeout=3)
         if resp.status_code == 200:
             models = resp.json().get('models', [])
             return jsonify({
                 "status": "online",
                 "models_count": len(models),
-                "host": "192.168.0.213:11434"
+                "host": OLLAMA_HOST.removeprefix("http://").removeprefix("https://")
             })
         return jsonify({"status": "error", "message": "Unexpected response"}), 500
     except Exception as e:
@@ -211,7 +215,7 @@ def orchestrator_agents():
         try:
             version = subprocess.check_output(["aider", "--version"], stderr=subprocess.STDOUT, timeout=3, text=True).strip()
             agents["aider"] = {"status": "installed", "version": version, "path": aider_path}
-        except:
+        except (subprocess.SubprocessError, OSError):
             agents["aider"] = {"status": "installed", "version": "unknown", "path": aider_path}
     else:
         agents["aider"] = {"status": "not_installed"}
@@ -222,7 +226,7 @@ def orchestrator_agents():
         try:
             version = subprocess.check_output(["codex", "--version"], timeout=3, text=True).strip()
             agents["codex"] = {"status": "installed", "version": version, "path": codex_path}
-        except:
+        except (subprocess.SubprocessError, OSError):
             agents["codex"] = {"status": "installed", "version": "unknown", "path": codex_path}
     else:
         agents["codex"] = {"status": "not_installed"}
@@ -233,7 +237,7 @@ def orchestrator_agents():
         try:
             version = subprocess.check_output(["claude", "--version"], timeout=3, text=True).strip()
             agents["claude"] = {"status": "installed", "version": version, "path": claude_path}
-        except:
+        except (subprocess.SubprocessError, OSError):
             agents["claude"] = {"status": "installed", "version": "unknown", "path": claude_path}
     else:
         agents["claude"] = {"status": "not_installed"}
@@ -244,7 +248,7 @@ def orchestrator_agents():
         try:
             version = subprocess.check_output(["copilot", "--version"], stderr=subprocess.STDOUT, timeout=3, text=True).strip()
             agents["copilot"] = {"status": "installed", "version": version, "path": copilot_path}
-        except:
+        except (subprocess.SubprocessError, OSError):
             agents["copilot"] = {"status": "installed", "version": "unknown", "path": copilot_path}
     else:
         agents["copilot"] = {"status": "not_installed"}

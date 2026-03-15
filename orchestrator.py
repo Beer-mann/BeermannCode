@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -111,11 +112,13 @@ def release_lock() -> None:
 # ============================================================================
 
 def save_state(state: dict[str, Any]) -> None:
-    """Save orchestrator state"""
+    """Save orchestrator state atomically to prevent corruption on crash."""
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     state["last_run"] = datetime.now().isoformat()
-    with STATE_FILE.open("w", encoding="utf-8") as f:
+    tmp_file = STATE_FILE.with_suffix(".tmp")
+    with tmp_file.open("w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, ensure_ascii=False)
+    tmp_file.replace(STATE_FILE)  # atomic on POSIX
 
 
 def load_state() -> dict[str, Any]:
@@ -343,7 +346,7 @@ def spawn_project_agent(
             timeout=5
         )
         repo_url = url_result.stdout.strip() if url_result.returncode == 0 else f"github.com/Beer-mann/{project_name}"
-    except:
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         repo_url = f"github.com/Beer-mann/{project_name}"
     
     # Generate branch name if not provided
@@ -490,7 +493,7 @@ def spawn_agent(
         
         # Run Aider
         env = os.environ.copy()
-        env["OLLAMA_API_BASE"] = "http://192.168.0.213:11434"
+        env["OLLAMA_API_BASE"] = os.getenv("OLLAMA_HOST", "http://192.168.0.213:11434")
         
         result = subprocess.run(
             [
@@ -758,7 +761,7 @@ def run_orchestration_cycle() -> dict[str, Any]:
             )
             if remote_result.returncode == 0 and "github.com" in remote_result.stdout:
                 github_projects.append(project_dir.name)
-        except:
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
             pass
     
     log(f"Found {len(github_projects)} GitHub projects: {', '.join(github_projects)}")
@@ -781,7 +784,7 @@ def run_orchestration_cycle() -> dict[str, Any]:
                 timeout=10
             )
             has_todos = result.returncode == 0
-        except:
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
             pass
         
         # Decide task type
@@ -972,54 +975,65 @@ def should_run_agent(agent_name: str) -> bool:
 # MAIN
 # ============================================================================
 
+def _handle_shutdown(signum: int, frame: object) -> None:
+    """Handle SIGTERM/SIGINT gracefully by releasing the lock before exit."""
+    log(f"[SIGNAL] Received signal {signum}, shutting down gracefully...")
+    release_lock()
+    sys.exit(1)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="🦅 BeermannCode Orchestrator v2.0")
     ap.add_argument("--dry-run", action="store_true", help="Simulate without executing")
     ap.add_argument("--agent", type=str, help="Run specific agent only")
     ap.add_argument("--no-notify", action="store_true", help="Disable WhatsApp notifications")
     ap.add_argument("--verbose", action="store_true", help="Verbose logging")
-    
+
     args = ap.parse_args()
-    
+
     # Override globals from args
     global NOTIFY_ENABLED, DRY_RUN
     if args.no_notify:
         NOTIFY_ENABLED = False
     if args.dry_run:
         DRY_RUN = True
-    
+
+    # Register shutdown handlers so the lock is released on SIGTERM/SIGINT
+    signal.signal(signal.SIGTERM, _handle_shutdown)
+    signal.signal(signal.SIGINT, _handle_shutdown)
+
     log("🦅 BeermannCode Orchestrator v2.0 starting...")
     log(f"Workspace: {WORKSPACE}")
     log(f"Config: {AGENTS_CONFIG}")
     log(f"Notifications: {'enabled' if NOTIFY_ENABLED else 'disabled'}")
     log(f"Dry-Run: {DRY_RUN}")
-    
+
     # Acquire lock
     if not acquire_lock():
         return 1
-    
+
     try:
         # Run orchestration cycle
         results = run_orchestration_cycle()
-        
+
         # Save state
         state = load_state()
         state["last_cycle"] = results
         save_state(state)
-        
+
         # Send summary
         if NOTIFY_ENABLED:
             send_cycle_summary(results)
-        
+
         log("\n✅ Orchestration cycle completed")
         return 0
-    
+
     except Exception as e:
         log(f"\n💥 Orchestration failed: {e}")
         import traceback
         log(traceback.format_exc())
         return 1
-    
+
     finally:
         release_lock()
 

@@ -6,6 +6,7 @@ WhatsApp Notifier für BeermannCode Orchestrator
 """
 
 import json
+import os
 import sys
 from pathlib import Path
 from datetime import datetime
@@ -16,8 +17,8 @@ STATE_FILE = WORKSPACE / "logs" / "orchestrator-state.json"
 TASK_QUEUE = WORKSPACE / "tasks" / "pending.jsonl"
 NOTIFICATION_LOG = WORKSPACE / "logs" / "whatsapp-notifications.log"
 
-# WhatsApp-Nummer
-WHATSAPP_TO = "+4917643995085"
+# WhatsApp-Nummer (set via WHATSAPP_TO env var)
+WHATSAPP_TO = os.getenv("WHATSAPP_TO", "+4917643995085")
 
 
 def log_notification(event_type: str, message: str):
@@ -35,7 +36,7 @@ def parse_last_cycle():
     
     try:
         return json.loads(STATE_FILE.read_text())
-    except:
+    except (json.JSONDecodeError, OSError):
         return None
 
 
@@ -138,7 +139,7 @@ def send_daily_summary():
                         failed += 1
                     elif status == 'pending':
                         pending += 1
-                except:
+                except json.JSONDecodeError:
                     pass
     
     # Build message
