@@ -144,6 +144,24 @@ def load_agents_config() -> dict[str, Any]:
         return {}
 
 
+def has_open_prs(project_dir: Path) -> bool:
+    """Return True if repo has any open PRs (avoid conflicts)."""
+    try:
+        pr_result = subprocess.run(
+            ["gh", "pr", "list", "--state", "open", "--json", "number"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=str(project_dir)
+        )
+        if pr_result.returncode != 0:
+            return False
+        data = json.loads(pr_result.stdout.strip() or "[]")
+        return len(data) > 0
+    except Exception:
+        return False
+
+
 # ============================================================================
 # TASK QUEUE MANAGEMENT
 # ============================================================================
