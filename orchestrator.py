@@ -20,6 +20,7 @@ import os
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -363,21 +364,22 @@ def spawn_project_agent(
     
     # Try agents in order: claude → codex → copilot
     # All use their direct CLI (no OpenClaw, no API keys)
+    # IMPORTANT: Short timeouts per agent to prevent one project blocking others
     agents = [
-        ("claude", ["claude", "-p", task_prompt, "--dangerously-skip-permissions"]),
-        ("codex", ["codex", "exec", "--yolo", task_prompt]),
-        ("copilot", ["copilot", "-p", task_prompt, "--yolo", "--add-dir", str(project_dir)]),
+        ("claude", ["claude", "-p", task_prompt, "--dangerously-skip-permissions"], 300),  # 5 min
+        ("codex", ["codex", "exec", "--yolo", task_prompt], 600),  # 10 min
+        ("copilot", ["copilot", "-p", task_prompt, "--yolo", "--add-dir", str(project_dir)], 300),  # 5 min
     ]
     
-    for agent_name, cmd in agents:
+    for agent_name, cmd, timeout_sec in agents:
         try:
-            log(f"[SPAWN] Trying {agent_name} for {project_name}...")
+            log(f"[SPAWN] Trying {agent_name} for {project_name} (timeout: {timeout_sec}s)...")
             
             spawn_result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=1800,  # 30 min
+                timeout=timeout_sec,
                 cwd=str(project_dir)
             )
             
@@ -588,10 +590,15 @@ def run_orchestration_cycle() -> dict[str, Any]:
     
     log(f"Found {len(projects_to_improve)} projects: {', '.join(projects_to_improve)}")
     
-    # Spawn one agent per project (tasks: ui, todos, tests, docs)
+    # ========== PARALLEL SPAWNING ==========
+    # Spawn agents for all projects in parallel (max 4 concurrent)
+    # This prevents one hanging project from blocking others
+    
     impl_results = {}
+    
+    # Pre-calculate task types for all projects
+    project_tasks = {}
     for project_name in projects_to_improve:
-        # Determine task type based on project state
         project_dir = PROJECTS_DIR / project_name
         
         # Priority: ui → tests → improve
@@ -613,11 +620,45 @@ def run_orchestration_cycle() -> dict[str, Any]:
         else:
             task_type = "improve"  # General improvements
         
-        log(f"[{project_name}] Task: {task_type}")
+        project_tasks[project_name] = task_type
+        log(f"[QUEUE] {project_name}: {task_type}")
+    
+    # Spawn in parallel (max 4 at a time)
+    log("\n[PARALLEL] Spawning agents (max 4 concurrent)...")
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {
+            executor.submit(spawn_project_agent, project_name, project_tasks[project_name]): project_name
+            for project_name in projects_to_improve
+        }
         
-        success, output = spawn_project_agent(project_name, task_type)
-        impl_results[project_name] = {"success": success, "output": output[:200], "task_type": task_type}
-        results["agents_run"][project_name] = impl_results[project_name]
+        for future in as_completed(futures):
+            project_name = futures[future]
+            try:
+                success, output = future.result(timeout=1200)  # 20 min max per task
+                impl_results[project_name] = {
+                    "success": success,
+                    "output": output[:200],
+                    "task_type": project_tasks[project_name]
+                }
+                results["agents_run"][project_name] = impl_results[project_name]
+                status = "✅" if success else "❌"
+                log(f"[DONE] {status} {project_name}")
+            except TimeoutError:
+                log(f"[TIMEOUT] {project_name} exceeded 20 min limit")
+                impl_results[project_name] = {
+                    "success": False,
+                    "output": "timeout",
+                    "task_type": project_tasks[project_name]
+                }
+                results["agents_run"][project_name] = impl_results[project_name]
+            except Exception as e:
+                log(f"[ERROR] {project_name}: {str(e)[:100]}")
+                impl_results[project_name] = {
+                    "success": False,
+                    "output": str(e)[:200],
+                    "task_type": project_tasks[project_name]
+                }
+                results["agents_run"][project_name] = impl_results[project_name]
     
     # ========== Step 3: Feature Agent (Continuous) ==========
     log("\n💡 Step 3: Feature Agent (Feature Proposals & Strategic Ideas)")
@@ -688,7 +729,9 @@ def run_orchestration_cycle() -> dict[str, Any]:
     
     log(f"Found {len(github_projects)} GitHub projects: {', '.join(github_projects)}")
     
-    # Spawn agent for each project (prioritize UI, then TODOs, then improvements)
+    # ========== PARALLEL SPAWNING FOR GITHUB PROJECTS ==========
+    # Pre-calculate task types
+    github_project_tasks = {}
     for project_name in github_projects:
         project_dir = PROJECTS_DIR / project_name
         
@@ -715,16 +758,42 @@ def run_orchestration_cycle() -> dict[str, Any]:
         else:
             task_type = "improve"
         
-        log(f"Spawning {task_type} agent for {project_name}...")
-        success, output = spawn_project_agent(project_name, task_type)
-        
-        results["agents_run"][f"github_{project_name}_{task_type}"] = {
-            "success": success,
-            "output": output[:200]
+        github_project_tasks[project_name] = task_type
+        log(f"[GITHUB-QUEUE] {project_name}: {task_type}")
+    
+    # Spawn in parallel (max 4 at a time)
+    log("\n[GITHUB-PARALLEL] Spawning GitHub agents (max 4 concurrent)...")
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {
+            executor.submit(spawn_project_agent, project_name, github_project_tasks[project_name]): project_name
+            for project_name in github_projects
         }
         
-        # Rate limit between spawns
-        time.sleep(5)
+        for future in as_completed(futures):
+            project_name = futures[future]
+            try:
+                success, output = future.result(timeout=1200)  # 20 min max per task
+                results["agents_run"][f"github_{project_name}"] = {
+                    "success": success,
+                    "output": output[:200],
+                    "task_type": github_project_tasks[project_name]
+                }
+                status = "✅" if success else "❌"
+                log(f"[GITHUB-DONE] {status} {project_name}")
+            except TimeoutError:
+                log(f"[GITHUB-TIMEOUT] {project_name} exceeded 20 min limit")
+                results["agents_run"][f"github_{project_name}"] = {
+                    "success": False,
+                    "output": "timeout",
+                    "task_type": github_project_tasks[project_name]
+                }
+            except Exception as e:
+                log(f"[GITHUB-ERROR] {project_name}: {str(e)[:100]}")
+                results["agents_run"][f"github_{project_name}"] = {
+                    "success": False,
+                    "output": str(e)[:200],
+                    "task_type": github_project_tasks[project_name]
+                }
     
     # ========== Step 6: Auto-Commit & Auto-Push ==========
     if AUTO_COMMIT or AUTO_PUSH:
