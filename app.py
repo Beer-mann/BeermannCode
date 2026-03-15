@@ -1,4 +1,5 @@
 import os
+import sys
 import tempfile
 import json
 from pathlib import Path
@@ -39,6 +40,19 @@ reviewer = CodeReviewer(config)
 generator = CodeGenerator(config)
 
 
+def _get_json_payload(required_fields=None):
+    """Return a validated JSON payload or an error response tuple."""
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return None, (jsonify({"error": "Expected a JSON object payload"}), 400)
+
+    for field in required_fields or []:
+        if field not in data:
+            return None, (jsonify({"error": f"Missing '{field}' field"}), 400)
+
+    return data, None
+
+
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -46,7 +60,13 @@ def index():
 
 @app.route("/dashboard")
 def dashboard():
-    """BeermannCode Orchestrator Dashboard"""
+    """BeermannCode main dashboard (status, agents, tasks, logs)."""
+    return render_template("dashboard.html")
+
+
+@app.route("/orchestrator")
+def orchestrator_dashboard():
+    """BeermannCode Orchestrator v4 dashboard."""
     return render_template("orchestrator_dashboard.html")
 
 
@@ -179,18 +199,21 @@ def orchestrator_tasks():
         return jsonify({"error": str(e)}), 500
 
 
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://192.168.0.213:11434")
+
+
 @app.route("/api/orchestrator/ollama")
 def orchestrator_ollama():
     """Check Ollama status"""
     try:
         import requests
-        resp = requests.get("http://192.168.0.213:11434/api/tags", timeout=3)
+        resp = requests.get(f"{OLLAMA_HOST}/api/tags", timeout=3)
         if resp.status_code == 200:
             models = resp.json().get('models', [])
             return jsonify({
                 "status": "online",
                 "models_count": len(models),
-                "host": "192.168.0.213:11434"
+                "host": OLLAMA_HOST.removeprefix("http://").removeprefix("https://")
             })
         return jsonify({"status": "error", "message": "Unexpected response"}), 500
     except Exception as e:
@@ -270,12 +293,15 @@ def languages():
 
 @app.route("/analyze", methods=["POST"])
 def analyze():
-    data = request.get_json()
-    if not data or "code" not in data:
-        return jsonify({"error": "Missing 'code' field"}), 400
+    data, error = _get_json_payload(required_fields=["code"])
+    if error:
+        return error
 
     code = data["code"]
     language = data.get("language", "python")
+
+    if not isinstance(code, str) or not code.strip():
+        return jsonify({"error": "'code' must be a non-empty string"}), 400
 
     if language not in LANGUAGE_EXTENSIONS:
         return jsonify({"error": f"Unsupported language '{language}'. See /languages."}), 400
@@ -299,12 +325,15 @@ def analyze():
 
 @app.route("/review", methods=["POST"])
 def review():
-    data = request.get_json()
-    if not data or "code" not in data:
-        return jsonify({"error": "Missing 'code' field"}), 400
+    data, error = _get_json_payload(required_fields=["code"])
+    if error:
+        return error
 
     code = data["code"]
     language = data.get("language", "python")
+
+    if not isinstance(code, str) or not code.strip():
+        return jsonify({"error": "'code' must be a non-empty string"}), 400
 
     if language not in LANGUAGE_EXTENSIONS:
         return jsonify({"error": f"Unsupported language '{language}'. See /languages."}), 400
@@ -317,9 +346,9 @@ def review():
 
 @app.route("/generate", methods=["POST"])
 def generate():
-    data = request.get_json()
-    if not data or "description" not in data:
-        return jsonify({"error": "Missing 'description' field"}), 400
+    data, error = _get_json_payload(required_fields=["description"])
+    if error:
+        return error
 
     language = data.get("language", "python")
     description = data["description"]
@@ -327,6 +356,13 @@ def generate():
     args = data.get("args", [])
     include_comments = data.get("include_comments", True)
     include_tests = data.get("include_tests", False)
+
+    if not isinstance(description, str) or not description.strip():
+        return jsonify({"error": "'description' must be a non-empty string"}), 400
+    if function_name is not None and (not isinstance(function_name, str) or not function_name.strip()):
+        return jsonify({"error": "'function_name' must be a non-empty string when provided"}), 400
+    if not isinstance(args, list) or any(not isinstance(arg, str) or not arg.strip() for arg in args):
+        return jsonify({"error": "'args' must be a list of non-empty strings"}), 400
 
     if language not in LANGUAGE_EXTENSIONS:
         return jsonify({"error": f"Unsupported language '{language}'. See /languages."}), 400
