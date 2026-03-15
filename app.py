@@ -55,6 +55,37 @@ def health():
     return jsonify({"status": "ok", "service": "BeermannCode"})
 
 
+@app.route("/api/studio/overview")
+def studio_overview():
+    """Provide lightweight metadata for the main studio UI."""
+    return jsonify({
+        "status": "ok",
+        "service": "BeermannCode",
+        "port": 5004,
+        "workflows": [
+            {
+                "id": "analyze",
+                "label": "Analyze",
+                "description": "Inspect complexity, quality score, and issue hotspots.",
+                "endpoint": "/analyze",
+            },
+            {
+                "id": "review",
+                "label": "Review",
+                "description": "Generate maintainability, safety, and style feedback.",
+                "endpoint": "/review",
+            },
+            {
+                "id": "generate",
+                "label": "Generate",
+                "description": "Turn a short prompt into implementation scaffolding.",
+                "endpoint": "/generate",
+            },
+        ],
+        "languages": list(LANGUAGE_EXTENSIONS.keys()),
+    })
+
+
 # ============================================================================
 # ORCHESTRATOR DASHBOARD API
 # ============================================================================
