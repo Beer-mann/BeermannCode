@@ -3,6 +3,7 @@ Code review module for CodeAI Platform.
 Provides automated code review and improvement suggestions.
 """
 
+import re
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 from pathlib import Path
@@ -238,8 +239,8 @@ class CodeReviewer:
                     suggestion="Consider optimizing nested loops or using more efficient algorithms"
                 ))
         
-        # Check for string concatenation in loops
-        if "+=" in code and ("for " in code or "while " in code):
+        # Check for string concatenation in loops (look for += inside a loop body)
+        if re.search(r'(for |while ).+\n(?:[ \t]+.*\n)*[ \t]+\w+\s*\+=\s*["\']', code):
             comments.append(ReviewComment(
                 line_number=None,
                 severity="warning",
@@ -265,11 +266,11 @@ class CodeReviewer:
                     suggestion="Use parameterized queries or prepared statements"
                 ))
         
-        # Check for hardcoded secrets
+        # Check for hardcoded secrets: only flag when a string literal is the assigned value
         sensitive_keywords = ["password", "api_key", "secret", "token"]
-        code_lower = code.lower()
         for keyword in sensitive_keywords:
-            if f'{keyword}=' in code_lower or f'{keyword} =' in code_lower:
+            pattern = rf'(?i){keyword}\s*=\s*["\'][^"\'{{}}][^"\']*["\']'
+            if re.search(pattern, code):
                 comments.append(ReviewComment(
                     line_number=None,
                     severity="critical",
@@ -306,7 +307,6 @@ class CodeReviewer:
             ))
         
         # Check for magic numbers
-        import re
         numbers = re.findall(r'\b\d{3,}\b', code)
         if len(numbers) > 5:
             comments.append(ReviewComment(

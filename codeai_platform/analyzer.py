@@ -3,6 +3,7 @@ Code analysis module for CodeAI Platform.
 Analyzes code quality, complexity, and potential issues.
 """
 
+import re
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 from pathlib import Path
@@ -105,9 +106,12 @@ class CodeAnalyzer:
         
         for file_path in project.rglob("*"):
             if file_path.is_file():
-                result = self.analyze_file(str(file_path))
-                if result:
-                    results.append(result)
+                try:
+                    result = self.analyze_file(str(file_path))
+                    if result:
+                        results.append(result)
+                except (OSError, UnicodeDecodeError, ValueError):
+                    pass
         
         return results
     
@@ -137,9 +141,9 @@ class CodeAnalyzer:
                 max_indent = max(max_indent, indent)
         nesting_factor = min(max_indent / 40, 1.0)
         
-        # Factor 3: Control structures
+        # Factor 3: Control structures (use word boundaries to avoid substrings like 'elif', 'before')
         control_keywords = ['if', 'for', 'while', 'switch', 'case']
-        control_count = sum(code.lower().count(keyword) for keyword in control_keywords)
+        control_count = sum(len(re.findall(rf'\b{kw}\b', code)) for kw in control_keywords)
         control_factor = min(control_count / 50, 1.0)
         
         # Combine factors (0-100 scale)

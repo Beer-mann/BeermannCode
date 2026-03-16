@@ -120,7 +120,7 @@ class CodeGenerator:
             params = ", ".join(parameters)
             code = f"/**\n * {name.replace('_', ' ').title()}\n"
             for param in parameters:
-                code += f" * @param {{{return_type}}} {param} - Description\n"
+                code += f" * @param {{*}} {param} - Description\n"
             code += f" * @returns {{{return_type}}} Description\n"
             code += f" */\n"
             code += f"function {name}({params}) {{\n"
