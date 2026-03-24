@@ -17,6 +17,7 @@ class CodeAIConfig:
     
     # AI Model Settings
     model_name: str = "codeai-v1"
+    openai_model: str = "gpt-4o-mini"
     max_tokens: int = 2048
     temperature: float = 0.7
     
@@ -78,3 +79,15 @@ class CodeAIConfig:
             raise ValueError(f"generation_style must be one of {valid_generation_styles}")
         
         return True
+
+    def get_openai_client(self):
+        """Return an OpenAI client if OPENAI_API_KEY is set, otherwise None."""
+        import os
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            return None
+        try:
+            from openai import OpenAI
+            return OpenAI(api_key=api_key)
+        except ImportError:
+            return None
